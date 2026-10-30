@@ -1,0 +1,247 @@
+export type Source = {
+  file: File;
+  url: string;
+  poster: string;
+  frames: string[];
+  duration: number;
+  coverage: "full" | "half";
+  isVideo: boolean;
+};
+export type Category = "top" | "bottom" | "accessory";
+export type Garment = {
+  id: string;
+  name: string;
+  category: Category;
+  image: string;
+  detail?: string;
+  accessory?: string;
+  file?: File;
+  purchaseUrl?: string;
+};
+export const labels: Record<Category, string> = {
+  top: "上衣",
+  bottom: "下装",
+  accessory: "配饰",
+};
+
+export function waitMedia(
+  target: HTMLMediaElement,
+  event: string,
+  timeout = 10000,
+) {
+  return new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timer);
+      target.removeEventListener(event, ok);
+      target.removeEventListener("error", fail);
+    };
+    const ok = () => {
+      cleanup();
+      resolve();
+    };
+    const fail = () => {
+      cleanup();
+      reject(new Error("浏览器无法读取视频，请使用 H.264 MP4 或 WebM"));
+    };
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error("读取视频超时，请换一段视频"));
+    }, timeout);
+    target.addEventListener(event, ok, { once: true });
+    target.addEventListener("error", fail, { once: true });
+  });
+}
+export function loadImage(src: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    const timer = setTimeout(() => reject(new Error("读取图片超时")), 10000);
+    image.onload = () => {
+      clearTimeout(timer);
+      resolve(image);
+    };
+    image.onerror = () => {
+      clearTimeout(timer);
+      reject(new Error("图片无法读取，请换一张 JPG、PNG 或 WebP"));
+    };
+    image.src = src;
+  });
+}
+export function canvasBlob(canvas: HTMLCanvasElement, quality = 0.9) {
+  return new Promise<Blob>((resolve, reject) =>
+    canvas.toBlob(
+      (b) => (b ? resolve(b) : reject(new Error("图片处理失败"))),
+      "image/jpeg",
+      quality,
+    ),
+  );
+}
+export async function imageFile(src: string, name = "image.jpg", max = 1280) {
+  const image = await loadImage(src);
+  const scale = Math.min(1, max / Math.max(image.width, image.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(image.width * scale);
+  canvas.height = Math.round(image.height * scale);
+  const ctx = canvas.getContext("2d")!;
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+  return new File([await canvasBlob(canvas)], name, { type: "image/jpeg" });
+}
+export async function validateImage(file: File) {
+  if (!["image/jpeg", "image/png", "image/webp"].includes(file.type))
+    throw new Error("请选择 JPG、PNG 或 WebP 图片");
+  if (file.size > 10 * 1024 * 1024) throw new Error("图片不能超过 10 MB");
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await loadImage(url);
+    if (Math.min(img.width, img.height) < 64)
+      throw new Error("图片至少需要 64 × 64 像素");
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+export async function readSource(
+  file: File,
+  coverage: Source["coverage"],
+  recordedDuration?: number,
+): Promise<Source> {
+  const isVideo =
+    file.type.startsWith("video/") || /\.(mp4|mov|webm)$/i.test(file.name);
+  if (!isVideo) {
+    await validateImage(file);
+    const url = URL.createObjectURL(file);
+    return {
+      file,
+      url,
+      poster: url,
+      frames: [url],
+      duration: 0,
+      coverage,
+      isVideo: false,
+    };
+  }
+  if (file.size > 30 * 1024 * 1024)
+    throw new Error("视频不能超过 30 MB，请压缩后重新上传");
+  const url = URL.createObjectURL(file);
+  const video = document.createElement("video");
+  video.muted = true;
+  video.playsInline = true;
+  video.preload = "auto";
+  try {
+    const ready = waitMedia(video, "loadeddata");
+    video.src = url;
+    await ready;
+    const duration = Number.isFinite(video.duration)
+      ? video.duration
+      : recordedDuration;
+    if (!duration || duration <= 0)
+      throw new Error("视频时长无法读取，请上传普通 MP4 文件");
+    if (duration > 10.15)
+      throw new Error("视频最长支持 10 秒，请截取 5～10 秒后再上传");
+    const scale = Math.min(
+      1,
+      1280 / Math.max(video.videoWidth, video.videoHeight),
+    );
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(video.videoWidth * scale);
+    canvas.height = Math.round(video.videoHeight * scale);
+    const frames: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      const time = Math.min(duration - 0.05, duration * (0.08 + i * 0.2));
+      if (Math.abs(video.currentTime - time) > 0.001) {
+        const ready = waitMedia(video, "seeked");
+        video.currentTime = Math.max(0, time);
+        await ready;
+      }
+      canvas
+        .getContext("2d")!
+        .drawImage(video, 0, 0, canvas.width, canvas.height);
+      frames.push(canvas.toDataURL("image/jpeg", 0.86));
+    }
+    return {
+      file,
+      url,
+      poster: frames[1],
+      frames,
+      duration,
+      coverage,
+      isVideo: true,
+    };
+  } catch (error) {
+    URL.revokeObjectURL(url);
+    throw error;
+  } finally {
+    video.pause();
+    video.removeAttribute("src");
+    video.load();
+  }
+}
+
+export async function buildReference(garments: Garment[], poster: string) {
+  if (garments.length === 1)
+    return {
+      file: await imageFile(garments[0].image, "garment.jpg"),
+      layout: `参考图为${labels[garments[0].category]}${garments[0].accessory ? `（${garments[0].accessory}）` : ""}`,
+    };
+  const person = await loadImage(poster);
+  const height = 1280;
+  const width = Math.max(
+    640,
+    Math.min(1600, Math.round((height * person.width) / person.height)),
+  );
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d")!;
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, width, height);
+  const cell = width / garments.length;
+  for (const [i, garment] of garments.entries()) {
+    const image = await loadImage(garment.image);
+    const scale = Math.min(
+      (cell - 30) / image.width,
+      (height - 110) / image.height,
+    );
+    ctx.drawImage(
+      image,
+      i * cell + (cell - image.width * scale) / 2,
+      80 + (height - 110 - image.height * scale) / 2,
+      image.width * scale,
+      image.height * scale,
+    );
+    ctx.fillStyle = "#151515";
+    ctx.font = "24px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(
+      `${i + 1}. ${labels[garment.category]}${garment.accessory || ""}`,
+      (i + 0.5) * cell,
+      45,
+    );
+  }
+  return {
+    file: new File([await canvasBlob(canvas)], "outfit-reference.jpg", {
+      type: "image/jpeg",
+    }),
+    layout: garments
+      .map(
+        (g, i) =>
+          `第${i + 1}列为${labels[g.category]}${g.accessory ? `（${g.accessory}）` : ""}`,
+      )
+      .join("；"),
+  };
+}
+export function buildPrompt(garments: Garment[], layout: string) {
+  return `将参考图中的服饰穿戴到视频人物身上，跟随人物原有动作。${layout}。只更换${garments.map((g) => labels[g.category] + (g.accessory || "")).join("、")}，保持人物面容、身份、发型、体型、姿势、背景和其余衣物不变。准确保留商品颜色、版型、纹理、图案与细节，呈现自然的布料和光影。参考图中的文字标签和白底不要出现在生成画面中。`;
+}
+export async function normalizeRecording(
+  blob: Blob,
+  elapsedMs: number,
+): Promise<Blob> {
+  if (!blob.type.includes("webm")) return blob;
+  try {
+    const { default: fixWebmDuration } = await import("fix-webm-duration");
+    return await fixWebmDuration(blob, elapsedMs, { logger: false });
+  } catch {
+    return blob;
+  } // Preserve a playable recording even if metadata repair fails.
+}
