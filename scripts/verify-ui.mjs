@@ -78,6 +78,27 @@ try {
   );
   assert.equal(await page.locator("#start").isDisabled(), true);
   assert.equal(starts, 0);
+  await page.locator("#person-video").waitFor({ state: "visible" });
+  await page.waitForFunction(
+    () =>
+      !document.querySelector("#person-video").paused &&
+      document.querySelector("#person-video").readyState >= 2,
+  );
+  assert.equal(await page.locator("#person-preview").isHidden(), true);
+  assert.equal(
+    await page.locator("#mode-video").getAttribute("aria-pressed"),
+    "true",
+  );
+  const framesBefore = await page
+    .locator("#person-video")
+    .evaluate((v) => v.getVideoPlaybackQuality().totalVideoFrames);
+  await page.waitForTimeout(500);
+  assert.ok(
+    (await page
+      .locator("#person-video")
+      .evaluate((v) => v.getVideoPlaybackQuality().totalVideoFrames)) >
+      framesBefore,
+  );
   await page.screenshot({
     path: ".local/verification/desktop.png",
     fullPage: true,
@@ -91,6 +112,7 @@ try {
     fullPage: true,
   });
   await page.setViewportSize({ width: 1280, height: 900 });
+  await page.locator("#mode-photo").click();
   await page.locator("#consent").check();
   await page.locator("#start").click();
   await page.waitForFunction(() =>
@@ -99,6 +121,7 @@ try {
   await page.waitForFunction(() => !document.querySelector("#start").disabled);
   assert.equal(await page.locator("#result-photo").isVisible(), true);
   assert.equal(finishes, 1);
+  assert.equal(await page.evaluate(() => globalThis.mockInput), "video");
   const photoEvent = page.waitForEvent("download");
   await page.locator("#save-photo").click();
   const photo = await photoEvent;
@@ -107,7 +130,7 @@ try {
     (await stat(".local/verification/test-only-photo.jpg")).size > 1000,
   );
   await page.locator("#compare").click();
-  assert.equal(await page.locator("#person-preview").isVisible(), true);
+  assert.equal(await page.locator("#person-video").isVisible(), true);
   await page.locator("#compare").click();
 
   // Link import renders user text safely; buying is an explicit link binding.

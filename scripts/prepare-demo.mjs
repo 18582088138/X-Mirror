@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, copyFileSync } from "node:fs";
+import { existsSync, mkdirSync, copyFileSync, unlinkSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 mkdirSync("public/demo", { recursive: true });
 mkdirSync("public/brand", { recursive: true });
@@ -27,11 +27,37 @@ function image(input, output, filter) {
     throw new Error(result.stderr || "请安装 ffmpeg 以准备参考素材");
 }
 image("xkd-x-mirror-logo.png", "public/brand/logo.webp", "scale=256:256");
-image(
-  "ref_material/GUI-reference.png",
-  "public/demo/studio.jpg",
-  "crop=330:660:242:40",
-);
+if (existsSync("ref_material/网站试衣服.mov")) {
+  // The supplied clip contains a product page. Keep the moving model panel.
+  const result = spawnSync(
+    "ffmpeg",
+    [
+      "-y",
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-i",
+      "ref_material/网站试衣服.mov",
+      "-vf",
+      "crop=978:1028:0:52",
+      "-t",
+      "10",
+      "-an",
+      "-c:v",
+      "libx264",
+      "-crf",
+      "20",
+      "-pix_fmt",
+      "yuv420p",
+      "-movflags",
+      "+faststart",
+      "public/demo/studio.mp4",
+    ],
+    { encoding: "utf8" },
+  );
+  if (result.status !== 0) throw new Error(result.stderr || "参考视频处理失败");
+}
+if (existsSync("public/demo/studio.jpg")) unlinkSync("public/demo/studio.jpg");
 image(
   "ref_material/GUI-reference.png",
   "public/demo/sweatshirt.jpg",

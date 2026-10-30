@@ -103,28 +103,25 @@ export class TryOnSession {
     });
     if (this.stopped) return;
     this.onStatus("正在准备人物画面…");
-    const stream =
-      mode === "video" && source.isVideo
-        ? await realtime.createLocalVideoStream({
-            file: source.file,
-            loop: true,
-            includeAudio: false,
-            videoFormat: defaultCameraVideoFormat(RealtimeModel.x2_1),
-          })
-        : await realtime.createLocalImageStream({
-            file: await imageFile(source.poster, "person.jpg"),
-            videoFormat: defaultCameraVideoFormat(RealtimeModel.x2_1),
-          });
+    const stream = source.isVideo
+      ? await realtime.createLocalVideoStream({
+          file: source.file,
+          loop: true,
+          includeAudio: false,
+          videoFormat: defaultCameraVideoFormat(RealtimeModel.x2_1),
+        })
+      : await realtime.createLocalImageStream({
+          file: await imageFile(source.poster, "person.jpg"),
+          videoFormat: defaultCameraVideoFormat(RealtimeModel.x2_1),
+        });
     if (this.stopped) return;
     this.localView.track = stream.videoTrack;
     this.onStatus("正在上传服饰参考图…");
-    const stored = await client
-      .createStorageService()
-      .uploadImage({
-        data: reference,
-        fileName: reference.name,
-        contentType: reference.type,
-      });
+    const stored = await client.createStorageService().uploadImage({
+      data: reference,
+      fileName: reference.name,
+      contentType: reference.type,
+    });
     if (this.stopped) return;
     this.onStatus("XMAX X2.1 正在为你试穿…");
     const remote = await realtime.startGeneration({

@@ -66,6 +66,7 @@ $("app").innerHTML = `
    <div class="stage-heading"><span id="stage-label" class="pill">${icon("person")}人物预览</span><button id="expand" class="icon-button" aria-label="全屏预览" title="全屏预览">${icon("expand")}</button></div>
    <div class="empty-stage" id="empty-stage"><img src="/brand/logo.webp" alt=""><h2>你的风格，从这里开始。</h2><p>上传一段短视频，遇见新的自己。</p><button class="outline" id="empty-upload">${icon("upload")}添加人物素材</button></div>
    <img id="person-preview" class="hero-media" alt="人物原始画面" hidden>
+   <video id="person-video" class="hero-media" muted autoplay loop playsinline aria-label="人物原始视频" hidden></video>
    <img id="result-photo" class="hero-media" alt="AI 生成的试穿照片" hidden>
    <video id="result-video" class="hero-media" muted loop playsinline controls hidden></video>
    <div id="remote" class="hero-media remote" hidden></div>
@@ -80,7 +81,7 @@ $("app").innerHTML = `
    <fieldset id="input-controls">
     <div class="section-label"><span><b>01</b> 把你带进试衣间</span><span class="muted">全身 / 半身均可</span></div>
     <div class="source-card"><button id="source-open" class="source-choice"><img id="source-thumb" alt="当前人物素材" hidden><span class="source-placeholder" id="source-placeholder">${icon("person")}</span><span><strong id="source-name">添加人物素材</strong><small id="source-description">上传短视频，或用摄像头录制</small></span><span class="source-change">更换 ${icon("arrow")}</span></button><button class="camera-shortcut" id="camera-open" aria-label="摄像头录制" title="摄像头录制">${icon("camera")}</button></div>
-    <div class="mode-row"><div class="segmented" aria-label="生成模式"><button id="mode-photo" class="selected" aria-pressed="true">照片预览</button><button id="mode-video" aria-pressed="false">动态短片</button></div><span id="mode-note">选帧试穿，更轻量</span></div>
+    <div class="mode-row"><div class="segmented" aria-label="生成模式"><button id="mode-photo" class="selected" aria-pressed="true">试穿照片</button><button id="mode-video" aria-pressed="false">动态短片</button></div><span id="mode-note">保存一张试穿照片</span></div>
     <div class="section-label" id="outfit"><span><b>02</b> 搭配你的下一套</span><span class="muted" id="outfit-count">选择心动的单品</span></div>
     <div id="slots" class="outfit-slots" aria-label="搭配槽位"></div>
     <div class="category-tabs" role="tablist" aria-label="服饰类别"><button data-category="top" role="tab" aria-selected="true" class="selected">上衣</button><button data-category="bottom" role="tab" aria-selected="false">下装</button><button data-category="accessory" role="tab" aria-selected="false">配饰</button><span id="catalog-note">我的衣橱</span></div>
@@ -105,11 +106,11 @@ $("app").innerHTML = `
  <p class="field-note">视频建议 5 秒，最长 10 秒、最大 30 MB。单人、光线充足、身体无遮挡。</p>
  <label class="coverage">人物入镜范围<select id="coverage"><option value="full">全身（腿部完整入镜）</option><option value="half">半身（主要试上衣 / 配饰）</option></select></label>
  <div id="camera-panel" class="camera-panel" hidden><video id="camera-preview" muted autoplay playsinline></video><div><span id="camera-clock">准备好后开始录制</span><button id="record-toggle" class="outline">开始录制</button><button id="camera-close" class="text-button">关闭摄像头</button></div></div>
- <div id="frame-picker" hidden><p class="section-label">选择一张清晰画面 <span class="muted">照片模式使用这一帧</span></p><div id="frames" class="frames"></div></div>
- <div id="demo-models" class="demo-models" hidden><span class="eyebrow">或先用本地参考素材体验</span><div><button data-model="studio">${icon("person")}全身照片</button><button data-model="woman">${icon("play")}半身视频</button><button data-model="man">${icon("person")}男模照片</button></div></div>
+ <div id="frame-picker" hidden><p class="section-label">选择视频封面 <span class="muted">试穿使用原视频的动作</span></p><div id="frames" class="frames"></div></div>
+ <div id="demo-models" class="demo-models" hidden><span class="eyebrow">或先用本地参考素材体验</span><div><button data-model="studio">${icon("play")}全身视频</button><button data-model="woman">${icon("play")}半身视频</button><button data-model="man">${icon("play")}男模视频</button></div></div>
  <p id="source-status" class="status" role="status"></p><button id="source-done" class="primary">使用这个人物 ${icon("check")}</button>
 </dialog>
-<dialog id="guide-dialog" class="guide-dialog"><div class="dialog-heading"><h2>让试穿效果更自然。</h2><button class="icon-button" data-close="guide-dialog" aria-label="关闭使用指南">${icon("close")}</button></div><ol><li><strong>拍一段真实的你。</strong><p>建议 5 秒，最长 10 秒。保持单人、明亮、无遮挡；试下装时让腿部完整入镜。</p></li><li><strong>选一张清晰画面。</strong><p>照片模式只使用所选画面；动态模式使用短视频的动作，并在最多 8 秒后停止生成。</p></li><li><strong>添加想试的单品。</strong><p>粘贴商品链接或上传清晰正面图片。页面需要登录、验证码或无法读取时，补传图片即可。</p></li><li><strong>试好了，再去购买。</strong><p>保存照片或短片，点击商品入口前往商家。上传图片时也可以在链接栏补充购买链接。</p></li></ol><p class="guide-privacy">原视频默认在浏览器本地选帧；动态模式会将视频画面实时传给 XMAX，音频不发送。服饰参考图上传至 XMAX 存储，第三方保存规则见其隐私政策。本应用不保存人物和结果素材，刷新页面后需重新上传。</p><a href="https://22duck.cn/docs/resources/privacy/" target="_blank" rel="noopener noreferrer">查看 XMAX 隐私政策 ↗</a><p class="field-note">配饰与多件组合效果仍需逐款确认；试穿图片不能替代真实尺码判断。</p></dialog>`;
+<dialog id="guide-dialog" class="guide-dialog"><div class="dialog-heading"><h2>让试穿效果更自然。</h2><button class="icon-button" data-close="guide-dialog" aria-label="关闭使用指南">${icon("close")}</button></div><ol><li><strong>拍一段真实的你。</strong><p>建议 5 秒，最长 10 秒。保持单人、明亮、无遮挡；试下装时让腿部完整入镜。</p></li><li><strong>选一张清晰画面。</strong><p>有视频时始终使用视频中的动作。可选择保存试穿照片，或生成最多 8 秒的动态短片。</p></li><li><strong>添加想试的单品。</strong><p>粘贴商品链接或上传清晰正面图片。页面需要登录、验证码或无法读取时，补传图片即可。</p></li><li><strong>试好了，再去购买。</strong><p>保存照片或短片，点击商品入口前往商家。上传图片时也可以在链接栏补充购买链接。</p></li></ol><p class="guide-privacy">视频素材的画面会实时传给 XMAX，音频不发送；照片素材以静态画面流处理。视频封面只用于缩略图。服饰参考图上传至 XMAX 存储，第三方保存规则见其隐私政策。本应用不保存人物和结果素材，刷新页面后需重新上传。</p><a href="https://22duck.cn/docs/resources/privacy/" target="_blank" rel="noopener noreferrer">查看 XMAX 隐私政策 ↗</a><p class="field-note">配饰与多件组合效果仍需逐款确认；试穿图片不能替代真实尺码判断。</p></dialog>`;
 
 function status(message: string, error = false) {
   $("status").textContent = message;
@@ -175,12 +176,19 @@ function clearResult() {
   $("result-actions").hidden = true;
   $("shopping").hidden = true;
   $("loading").hidden = true;
-  $("person-preview").hidden = !source;
+  showOriginal(!!source);
   $("empty-stage").hidden = !!source;
   $("stage-label").innerHTML = `${icon("person")}人物预览`;
   $("stage-caption").textContent = "一段视频，无限穿搭灵感。";
   $("compare").classList.remove("comparing");
   controls();
+}
+function showOriginal(visible: boolean) {
+  $("person-preview").hidden = !visible || !!source?.isVideo;
+  const video = $<HTMLVideoElement>("person-video");
+  video.hidden = !visible || !source?.isVideo;
+  if (!video.hidden) void video.play().catch(() => {});
+  else video.pause();
 }
 function renderSource() {
   if (!source) return;
@@ -188,6 +196,15 @@ function renderSource() {
     $<HTMLImageElement>(id).src = source.poster;
     $(id).hidden = false;
   }
+  const video = $<HTMLVideoElement>("person-video");
+  if (source.isVideo && video.getAttribute("src") !== source.url)
+    video.src = source.url;
+  if (!source.isVideo) {
+    video.pause();
+    video.removeAttribute("src");
+    video.load();
+  }
+  showOriginal(true);
   $("source-placeholder").hidden = true;
   $("source-name").textContent = source.file.name;
   $("source-description").textContent =
@@ -213,7 +230,7 @@ function renderSource() {
   });
   $("frame-picker").hidden = source.frames.length < 2;
   $<HTMLSelectElement>("coverage").value = source.coverage;
-  if (!source.isVideo) setMode("photo");
+  setMode(source.isVideo ? "video" : "photo");
   controls();
 }
 async function setSource(
@@ -253,7 +270,7 @@ function setMode(next: "photo" | "video") {
   }
   $("mode-note").textContent =
     mode === "photo"
-      ? "选帧试穿，更轻量"
+      ? "保存一张试穿照片"
       : `动态预览 · 最多 ${config?.outputSeconds || 8} 秒`;
 }
 function renderSlots() {
@@ -542,18 +559,18 @@ document.querySelectorAll<HTMLButtonElement>("[data-model]").forEach(
       if (loadingSource) return;
       const name = button.dataset.model!;
       try {
-        const path = name === "woman" ? "/demo/woman.mp4" : `/demo/${name}.jpg`;
+        const path = `/demo/${name}.mp4`;
         const res = await fetch(path);
         if (!res.ok) throw new Error("参考素材尚未准备，请上传自己的素材");
         await setSource(
           new File(
             [await res.blob()],
             name === "studio"
-              ? "Studio 全身参考.jpg"
+              ? "Studio 网站试衣服.mp4"
               : name === "man"
-                ? "男模半身参考.jpg"
+                ? "男模半身参考.mp4"
                 : "半身参考视频.mp4",
-            { type: name === "woman" ? "video/mp4" : "image/jpeg" },
+            { type: "video/mp4" },
           ),
           name === "studio" ? "full" : "half",
         );
@@ -700,7 +717,7 @@ function renderShopping() {
 }
 function showResult() {
   if (!result?.photo) return;
-  $("person-preview").hidden = !comparing;
+  showOriginal(comparing);
   $("remote").hidden = true;
   $<HTMLImageElement>("result-photo").src = result.photo;
   $("result-photo").hidden = comparing || !!resultURL;
@@ -762,7 +779,7 @@ async function end(error?: string) {
       showResult();
     } else {
       $("remote").hidden = true;
-      $("person-preview").hidden = !source;
+      showOriginal(!!source);
     }
     const partial = !!result?.photo && !!error?.includes("等待超时");
     status(
@@ -833,7 +850,7 @@ $("start").onclick = async () => {
       () => {
         if (!valid()) return;
         $("loading").hidden = true;
-        $("person-preview").hidden = true;
+        showOriginal(false);
         $("remote").hidden = false;
         $("stage-label").innerHTML = `<i class="live-dot"></i>正在试穿`;
         $("stage-caption").textContent = lastOutfit
@@ -915,11 +932,11 @@ void (async () => {
     $("demo-models").hidden = !config?.demoEnabled;
     renderWardrobe();
     if (config?.demoEnabled) {
-      const response = await fetch("/demo/studio.jpg");
+      const response = await fetch("/demo/studio.mp4");
       if (response.ok)
         await setSource(
-          new File([await response.blob()], "Studio 全身参考.jpg", {
-            type: "image/jpeg",
+          new File([await response.blob()], "Studio 网站试衣服.mp4", {
+            type: "video/mp4",
           }),
           "full",
         );

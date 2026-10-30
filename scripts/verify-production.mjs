@@ -41,13 +41,15 @@ try {
   assert.equal(await page.locator("#empty-stage").isVisible(), true);
   assert.equal(await page.locator("#start").isDisabled(), true);
   const response = await page.request.get(
-    "http://127.0.0.1:5181/demo/studio.jpg",
+    "http://127.0.0.1:5181/demo/studio.mp4",
   );
   assert.equal(response.status(), 404);
   await page.locator("#source-open").click();
-  await page.locator("#model-file").setInputFiles("public/demo/studio.jpg");
+  await page
+    .locator("#model-file")
+    .setInputFiles("ref_material/materials/references/person.png");
   await page.waitForFunction(
-    () => document.querySelector("#source-name").textContent === "studio.jpg",
+    () => document.querySelector("#source-name").textContent === "person.png",
   );
   await page.locator("#source-done").click();
   await page.locator("#garment-file").setInputFiles("public/demo/top.jpg");
