@@ -1,0 +1,67 @@
+{
+  "person.png": {
+    "url": "https://cdn.22duck.cn/images/playground/charx/charx_image1.png",
+    "license": "官方演示素材；未声明开放授权",
+    "purpose": "本地测试"
+  },
+  "character.png": {
+    "url": "https://cdn.22duck.cn/images/playground/charx/charx_image2.png",
+    "license": "官方演示素材；未声明开放授权",
+    "purpose": "本地测试"
+  },
+  "face.png": {
+    "url": "https://cdn.22duck.cn/images/playground/free/free_image1.png",
+    "license": "官方演示素材；未声明开放授权",
+    "purpose": "本地测试"
+  },
+  "head.jpeg": {
+    "url": "https://cdn.22duck.cn/images/playground/free/free_image4.jpeg",
+    "license": "官方演示素材；未声明开放授权",
+    "purpose": "本地测试"
+  },
+  "outfit.png": {
+    "url": "https://cdn.22duck.cn/images/playground/clothx/clothx_image2.png",
+    "license": "官方演示素材；未声明开放授权",
+    "purpose": "本地测试"
+  },
+  "top.png": {
+    "url": "https://cdn.22duck.cn/images/playground/clothx/clothx_image3.png",
+    "license": "官方演示素材；未声明开放授权",
+    "purpose": "本地测试"
+  },
+  "hat.jpg": {
+    "url": "https://cdn.22duck.cn/images/playground/clothx/clothx_image8.jpg",
+    "license": "官方演示素材；未声明开放授权",
+    "purpose": "本地测试"
+  },
+  "background.png": {
+    "url": "https://cdn.22duck.cn/images/playground/free/free_image6.png",
+    "license": "官方演示素材；未声明开放授权",
+    "purpose": "本地测试"
+  },
+  "motion.png": {
+    "url": "https://cdn.22duck.cn/images/playground/vibex/vibex_image1.png",
+    "license": "官方演示素材；未声明开放授权",
+    "purpose": "本地测试"
+  },
+  "summon.jpg": {
+    "url": "https://cdn.22duck.cn/images/playground/dimx/dimx_image1.jpg",
+    "license": "官方演示素材；未声明开放授权",
+    "purpose": "本地测试"
+  },
+  "sky.jpg": {
+    "url": "https://upload.wikimedia.org/wikipedia/commons/c/c0/Field%2C_corn%2C_Liechtenstein%2C_Mountains%2C_Alps%2C_Vaduz%2C_sky%2C_clouds%2C_landscape.jpg",
+    "page": "https://commons.wikimedia.org/wiki/File:Field,_corn,_Liechtenstein,_Mountains,_Alps,_Vaduz,_sky,_clouds,_landscape.jpg",
+    "title": "File:Field, corn, Liechtenstein, Mountains, Alps, Vaduz, sky, clouds, landscape.jpg",
+    "author": "<a href=\"//commons.wikimedia.org/wiki/User:Paranoid\" title=\"User:Paranoid\">Paranoid</a>",
+    "license": "Public domain"
+  },
+  "underwater.jpg": {
+    "url": "https://upload.wikimedia.org/wikipedia/commons/8/84/Coral_reef_fish_swim_above_the_coral_slope.jpg",
+    "page": "https://commons.wikimedia.org/wiki/File:Coral_reef_fish_swim_above_the_coral_slope.jpg",
+    "title": "File:Coral reef fish swim above the coral slope.jpg",
+    "author": "<a href=\"//commons.wikimedia.org/w/index.php?title=User:Vikram_jadhav&amp;action=edit&amp;redlink=1\" class=\"new\" title=\"User:Vikram jadhav (page does not exist)\">jadhav vikram</a>",
+    "license": "CC BY-SA 4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0"
+  }
+}

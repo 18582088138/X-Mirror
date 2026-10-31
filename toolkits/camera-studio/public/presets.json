@@ -1,0 +1,110 @@
+[
+  {
+    "id": "person",
+    "name": "换人",
+    "category": "人物替换",
+    "image": "/materials/person.png",
+    "prompt": "视频中人物替换成参考图中角色",
+    "referenceUrl": "https://cdn.22duck.cn/images/playground/charx/charx_image1.png",
+    "source": "XMAX 官方演示素材"
+  },
+  {
+    "id": "character",
+    "name": "换角色",
+    "category": "人物替换",
+    "image": "/materials/character.png",
+    "prompt": "视频中角色替换成参考图中角色",
+    "referenceUrl": "https://cdn.22duck.cn/images/playground/charx/charx_image2.png",
+    "source": "XMAX 官方演示素材"
+  },
+  {
+    "id": "face",
+    "name": "换脸",
+    "category": "人物替换",
+    "image": "/materials/face.png",
+    "prompt": "将视频中人物的脸换成参考图中的脸。只换参考图的脸，其他保持不变",
+    "referenceUrl": "https://cdn.22duck.cn/images/playground/free/free_image1.png",
+    "source": "XMAX 官方演示素材"
+  },
+  {
+    "id": "head",
+    "name": "换头",
+    "category": "人物替换",
+    "image": "/materials/head.jpeg",
+    "prompt": "将视频中人物的头换成参考图中的头。只换参考图的头，其他保持不变",
+    "referenceUrl": "https://cdn.22duck.cn/images/playground/free/free_image4.jpeg",
+    "source": "XMAX 官方演示素材"
+  },
+  {
+    "id": "outfit",
+    "name": "换装（套装）",
+    "category": "虚拟试穿",
+    "image": "/materials/outfit.png",
+    "prompt": "将参考图的服装穿戴到视频角色身上，跟随角色原有动作。",
+    "referenceUrl": "https://cdn.22duck.cn/images/playground/clothx/clothx_image2.png",
+    "source": "XMAX 官方演示素材"
+  },
+  {
+    "id": "top",
+    "name": "单品试穿（上衣）",
+    "category": "虚拟试穿",
+    "image": "/materials/top.png",
+    "prompt": "将参考图的上衣穿到视频人物身上，其他保持不变",
+    "referenceUrl": "https://cdn.22duck.cn/images/playground/clothx/clothx_image3.png",
+    "source": "XMAX 官方演示素材"
+  },
+  {
+    "id": "hat",
+    "name": "帽子试穿",
+    "category": "虚拟试穿",
+    "image": "/materials/hat.jpg",
+    "prompt": "将参考图帽子应用到视频角色身上",
+    "referenceUrl": "https://cdn.22duck.cn/images/playground/clothx/clothx_image8.jpg",
+    "source": "XMAX 官方演示素材"
+  },
+  {
+    "id": "background",
+    "name": "换背景",
+    "category": "日常替换",
+    "image": "/materials/background.png",
+    "prompt": "将视频的背景替换为参考图背景",
+    "referenceUrl": "https://cdn.22duck.cn/images/playground/free/free_image6.png",
+    "source": "XMAX 官方演示素材"
+  },
+  {
+    "id": "motion",
+    "name": "动作迁移",
+    "category": "日常替换",
+    "image": "/materials/motion.png",
+    "prompt": "参考图角色重现视频动作，角色全部外观细节保留，保留并使用参考图的背景",
+    "referenceUrl": "https://cdn.22duck.cn/images/playground/vibex/vibex_image1.png",
+    "source": "XMAX 官方演示素材"
+  },
+  {
+    "id": "summon",
+    "name": "召唤虚拟生命",
+    "category": "交互能力",
+    "image": "/materials/summon.jpg",
+    "prompt": "召唤新增任务：保留原视频中已有的主体，额外加入参考图中的主体，不替换任何原有主体。把参考图角色召唤到视频人物的肩膀上或者手上",
+    "referenceUrl": "https://cdn.22duck.cn/images/playground/dimx/dimx_image1.jpg",
+    "source": "XMAX 官方演示素材"
+  },
+  {
+    "id": "sky",
+    "name": "天空山景",
+    "category": "日常替换",
+    "image": "/materials/sky.jpg",
+    "prompt": "将视频的背景替换为参考图中的天空、云朵和山景，人物面容、衣服和动作保持不变。",
+    "referenceUrl": null,
+    "source": "Wikimedia Commons，来源和许可见 sources.json"
+  },
+  {
+    "id": "underwater",
+    "name": "水下世界",
+    "category": "日常替换",
+    "image": "/materials/underwater.jpg",
+    "prompt": "将视频背景替换为参考图中的水下珊瑚和鱼群，人物面容、衣服和动作保持不变。",
+    "referenceUrl": null,
+    "source": "Wikimedia Commons，来源和许可见 sources.json"
+  }
+]

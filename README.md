@@ -2,6 +2,20 @@
 
 XMAX X2.1 驱动的轻量网页虚拟试衣间。手机与电脑通过浏览器打开，上传或录制短视频，选择服饰，生成试穿照片或短片，再前往原商品页面购买。
 
+## 独立 toolkits
+
+[Camera Studio](toolkits/camera-studio/README.md) 支持摄像头录制 3～10 秒短片、右侧素材与提示词、Xmax X2.1 生成、本地自动保存及历史回放。位于 `toolkits/camera-studio`，使用独立配置和输出目录，默认端口 5190。
+
+```powershell
+# 首次配置，已有文件时不要覆盖
+Copy-Item toolkits/camera-studio/.env.example toolkits/camera-studio/.env
+# 填写 toolkit 的 XMAX_API_KEY，按需配置代理
+npm run toolkit:camera:setup
+npm run toolkit:camera
+```
+
+更多说明见 [toolkits](toolkits/README.md)。素材由准备脚本下载到本地；演示图片、密钥、录像和生成结果不进入仓库。
+
 ## 本地启动
 
 需要 Node.js 22.12+，推荐 Node.js 24。

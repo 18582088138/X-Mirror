@@ -12,7 +12,10 @@
     "test:production": "node scripts/verify-production.mjs",
     "check:secrets": "node scripts/check-secrets.mjs",
     "test:live": "node scripts/verify-live.mjs --real-api",
-    "prepare:demo": "node scripts/prepare-demo.mjs"
+    "prepare:demo": "node scripts/prepare-demo.mjs",
+    "toolkit:camera": "npm --prefix toolkits/camera-studio start",
+    "toolkit:camera:setup": "npm --prefix toolkits/camera-studio ci && npm --prefix toolkits/camera-studio run prepare:materials",
+    "toolkit:camera:test": "npm --prefix toolkits/camera-studio run test:ui"
   },
   "dependencies": {
     "@xmaxai/web-sdk": "1.1.0",
