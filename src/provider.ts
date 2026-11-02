@@ -1,3 +1,4 @@
+import { ClipRecorder } from "./clip-recorder";
 import {
   RealtimeConfiguration,
   RealtimeContext,
@@ -11,6 +12,7 @@ import {
   RealtimeVideoFormat,
   type RealtimeTiming,
   type DownlinkVideoStatistics,
+  type RemoteMediaTracks,
   type XmaxRealtimeManaging,
 } from "@xmaxai/web-sdk";
 import { loadImage, waitMedia, normalizeRecording, type Source } from "./media";
@@ -32,6 +34,8 @@ export type Result = {
   startupMs?: number;
   timing?: RealtimeTiming;
   transport?: DownlinkVideoStatistics;
+  remoteUserID?: string;
+  failure?: string;
 };
 export class TryOnSession {
   private manager?: XmaxRealtimeManaging;
@@ -44,8 +48,12 @@ export class TryOnSession {
     isInteractionEnabled: false,
   });
   private localContainer = document.createElement("div");
+  private remoteVideo = document.createElement("video");
+  private rawTrack?: MediaStreamTrack;
   private recorder?: MediaRecorder;
+  private clipRecorder?: ClipRecorder;
   private recordTrack?: MediaStreamTrack;
+  private recordTimer?: ReturnType<typeof setInterval>;
   private timer?: ReturnType<typeof setTimeout>;
   private frameTimer?: ReturnType<typeof setInterval>;
   private chunks: Blob[] = [];
@@ -65,7 +73,12 @@ export class TryOnSession {
     private onReady: () => void,
     private onEnd: (result: Result, error?: string) => void,
   ) {
-    this.view.attach(container);
+    this.remoteVideo.muted = true;
+    this.remoteVideo.autoplay = true;
+    this.remoteVideo.playsInline = true;
+    this.remoteVideo.setAttribute("aria-label", "XMAX 远端试穿结果");
+    this.remoteVideo.dataset.origin = "xmax-remote";
+    container.append(this.remoteVideo);
     this.localContainer.setAttribute("aria-hidden", "true");
     Object.assign(this.localContainer.style, {
       position: "fixed",
@@ -77,6 +90,7 @@ export class TryOnSession {
     });
     document.body.append(this.localContainer);
     this.localView.attach(this.localContainer);
+    this.view.attach(this.localContainer); // SDK timing/preview warmup stays offscreen.
   }
   async start(
     ticket: Ticket,
@@ -102,6 +116,7 @@ export class TryOnSession {
       }),
     );
     this.manager = realtime;
+    realtime.setRemoteMediaTracksListener((tracks) => this.bindRemote(tracks));
     await realtime.setStateListener((state) => {
       if (this.stopped) return;
       window.dispatchEvent(
@@ -143,20 +158,21 @@ export class TryOnSession {
     if (this.stopped) return;
     this.view.track = remote.videoTrack;
     // Hold the original first frame through connection warmup. Never loop the source.
-    this.frameTimer = setInterval(() => {
-      const video = this.view.videoElement;
-      if (this.stopped || video.readyState < 2 || !video.videoWidth) return;
+    this.frameTimer = setInterval(async () => {
+      const video = this.remoteVideo;
+      if (this.stopped || !this.rawTrack || this.rawTrack.readyState !== "live" || video.readyState < 2 || !video.videoWidth) return;
       this.result.width = video.videoWidth;
       this.result.height = video.videoHeight;
       if (!this.startedFrames) {
         this.startedFrames = true;
         this.result.startupMs = performance.now() - launched;
         if (mode === "video") {
-          try { this.record(video); }
+          try { await this.record(video); }
           catch (error) {
             this.onEnd(this.result, error instanceof Error ? error.message : "视频录制失败");
             return;
           }
+          if (this.stopped) return;
           void this.inputVideo?.play().catch(() =>
             this.onEnd(this.result, "人物视频播放失败，请使用 H.264 MP4 后重试"));
         }
@@ -175,6 +191,28 @@ export class TryOnSession {
         this.result.photo = canvas.toDataURL("image/jpeg", 0.95);
       }
     }, 50);
+  }
+  private bindRemote(tracks?: RemoteMediaTracks) {
+    if (this.stopped) return;
+    if (!tracks) {
+      if (this.startedFrames) this.onEnd(this.result, "远端结果流已断开，未完成的短片已停止");
+      this.rawTrack = undefined;
+      this.remoteVideo.srcObject = null;
+      return;
+    }
+    if (tracks.videoTrack === this.rawTrack) return;
+    if (this.startedFrames) {
+      this.onEnd(this.result, "远端结果流已更换，请重新生成完整短片");
+      return;
+    }
+    this.rawTrack = tracks.videoTrack;
+    this.result.remoteUserID = tracks.userID;
+    this.remoteVideo.srcObject = new MediaStream([tracks.videoTrack]);
+    tracks.videoTrack.addEventListener("ended", () => {
+      if (!this.stopped) this.onEnd(this.result, "远端生成视频已中断");
+    }, { once: true });
+    void this.remoteVideo.play().catch(() =>
+      this.onEnd(this.result, "浏览器无法播放远端试穿视频，请更换浏览器重试"));
   }
   private async prepareHDInput(realtime: XmaxRealtimeManaging, source: Source) {
     let media: HTMLVideoElement | HTMLImageElement;
@@ -215,7 +253,14 @@ export class TryOnSession {
       }),
     });
   }
-  private record(video: HTMLVideoElement) {
+  private async record(video: HTMLVideoElement) {
+    if (await ClipRecorder.supported(video.videoWidth, video.videoHeight)) {
+      if (this.stopped) return;
+      this.clipRecorder = new ClipRecorder(video, () =>
+        this.onEnd(this.result, "视频编码失败，请换用新版浏览器重试"));
+      this.recordedAt = performance.now();
+      return;
+    }
     if (!("MediaRecorder" in window)) throw new Error("浏览器不支持视频保存，请使用新版 Chrome、Edge 或 Safari");
     const stream = video.srcObject;
     if (!(stream instanceof MediaStream)) throw new Error("未收到可录制的视频流");
@@ -224,7 +269,20 @@ export class TryOnSession {
     );
     if (!mime || !stream.getVideoTracks()[0]) throw new Error("浏览器不支持当前视频录制格式");
     try {
-      this.recordTrack = stream.getVideoTracks()[0].clone();
+      // RTC tracks can contain discontinuous RTP timestamps. Re-sample displayed
+      // remote pixels on the browser clock; preserve pauses without compressing time.
+      const canvas = document.createElement("canvas");
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext("2d")!;
+      this.localContainer.append(canvas);
+      this.recordTrack = canvas.captureStream(30).getVideoTracks()[0];
+      const paint = () => {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        (this.recordTrack as CanvasCaptureMediaStreamTrack).requestFrame?.();
+      };
+      paint();
+      this.recordTimer = setInterval(paint, 1000 / 30);
       this.recorder = new MediaRecorder(new MediaStream([this.recordTrack]), {
         mimeType: mime,
         videoBitsPerSecond: 8_000_000,
@@ -238,7 +296,9 @@ export class TryOnSession {
       };
       this.recorder.start(300);
       this.recordedAt = performance.now();
+      paint();
     } catch {
+      clearInterval(this.recordTimer);
       this.recordTrack?.stop();
       throw new Error("视频保存失败，请换用新版浏览器后重试");
     }
@@ -249,8 +309,16 @@ export class TryOnSession {
     clearTimeout(this.timer);
     clearInterval(this.frameTimer);
     clearInterval(this.paintTimer);
+    clearInterval(this.recordTimer);
     this.inputVideo?.pause();
     this.closing = (async () => {
+      if (this.clipRecorder) {
+        const elapsed = performance.now() - this.recordedAt;
+        this.result.duration = elapsed / 1000;
+        if (elapsed < this.targetSeconds * 1000 - 100) this.result.complete = false;
+        try { this.result.video = await this.clipRecorder.finish(elapsed); }
+        catch { this.result.failure = "视频保存失败，未生成可播放的完整短片"; this.result.complete = false; }
+      }
       if (this.recorder && this.recorder.state !== "inactive") {
         const recorder = this.recorder;
         const elapsed = performance.now() - this.recordedAt;
@@ -275,6 +343,11 @@ export class TryOnSession {
           );
       }
       this.recordTrack?.stop();
+      this.remoteVideo.pause();
+      this.remoteVideo.srcObject = null;
+      this.manager?.setRemoteMediaTracksListener(undefined);
+      this.view.track = undefined;
+      this.localView.track = undefined;
       this.cleanup = this.manager?.close().catch(() => {}) ?? Promise.resolve();
       this.inputStream?.getTracks().forEach((track) => track.stop());
       if (this.inputVideo) {

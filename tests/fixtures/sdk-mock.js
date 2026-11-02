@@ -31,8 +31,8 @@ export class XmaxRealtimeVideoView {
     container.append(this.videoElement);
   }
   set track(value) {
-    this.videoElement.srcObject = new MediaStream([value]);
-    void this.videoElement.play();
+    this.videoElement.srcObject = value ? new MediaStream([value]) : null;
+    if (value) void this.videoElement.play().catch(() => {});
   }
 }
 export class XmaxClient {
@@ -45,7 +45,7 @@ export class XmaxClient {
   }
   createRealtimeManager(configuration) {
     globalThis.mockConfiguration = configuration;
-    let callback, stream, ticker, local;
+    let callback, stream, ticker, local, remoteListener;
     const localStream = () => {
       const canvas = document.createElement("canvas");
       canvas.width = 16;
@@ -58,6 +58,7 @@ export class XmaxClient {
       setStateListener: async (listener) => {
         callback = listener;
       },
+      setRemoteMediaTracksListener: (listener) => { remoteListener = listener; },
       setTimingListener: async () => {},
       setDownlinkVideoStatisticsListener: async () => {},
       createExternalVideoStream: async (options) => {
@@ -93,7 +94,9 @@ export class XmaxClient {
         ticker = setInterval(paint, 50);
         stream = canvas.captureStream(20);
         callback?.({ connectionState: "generating" });
-        return { videoTrack: stream.getVideoTracks()[0] };
+        if (!globalThis.mockNoRemote)
+          remoteListener?.({bindingID:"test-result", userID:"bot-test", videoTrack:stream.getVideoTracks()[0]});
+        return { videoTrack: local.getVideoTracks()[0] }; // Deliberately expose local preview; app must use the raw remote listener.
       },
       close: async () => {
         clearInterval(ticker);

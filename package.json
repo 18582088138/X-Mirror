@@ -21,7 +21,8 @@
     "@xmaxai/web-sdk": "1.1.0",
     "cheerio": "1.1.2",
     "fix-webm-duration": "1.0.6",
-    "undici": "^7.16.0"
+    "undici": "^7.16.0",
+    "webm-muxer": "^5.1.4"
   },
   "overrides": {
     "fast-xml-parser": "^5.7.0"

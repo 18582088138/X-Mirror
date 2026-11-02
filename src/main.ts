@@ -6,6 +6,7 @@ import {
   buildReference,
   buildPrompt,
   normalizeRecording,
+  loadImage,
   labels,
   type Category,
   type Source,
@@ -89,6 +90,7 @@ $("app").innerHTML = `
     <div id="slots" class="outfit-slots" aria-label="搭配槽位"></div>
     <div class="category-tabs" role="tablist" aria-label="服饰类别"><button data-category="top" role="tab" aria-selected="true" class="selected">上衣</button><button data-category="bottom" role="tab" aria-selected="false">下装</button><button data-category="accessory" role="tab" aria-selected="false">配饰</button><span id="catalog-note">我的衣橱</span></div>
     <div class="wardrobe" id="wardrobe" aria-label="可选单品"></div>
+    <p id="garment-quality" class="field-note" role="status" hidden></p>
     <div class="accessory-kind" id="accessory-kind" hidden><label for="accessory-select">配饰类型</label><select id="accessory-select"><option>帽子</option><option>眼镜</option></select><small>配饰与多件搭配为实验功能</small></div>
     <form id="link-form" class="product-link"><span>${icon("link")}</span><label class="sr-only" for="product-url">商品或服饰图片链接</label><input id="product-url" type="url" placeholder="粘贴商品链接或服饰图片链接" maxlength="2000"><button id="resolve-link" type="submit">添加 ${icon("plus")}</button></form>
     <p id="link-status" class="field-note" role="status" hidden></p><button id="bind-link" class="bind-link" hidden>将此购买链接绑定到当前单品 ↗</button>
@@ -113,7 +115,7 @@ $("app").innerHTML = `
  <div id="demo-models" class="demo-models" hidden><span class="eyebrow">或先用本地参考素材体验</span><div><button data-model="studio">${icon("play")}全身视频</button><button data-model="woman">${icon("play")}半身视频</button><button data-model="man">${icon("play")}男模视频</button></div></div>
  <p id="source-status" class="status" role="status"></p><button id="source-done" class="primary">使用这个人物 ${icon("check")}</button>
 </dialog>
-<dialog id="guide-dialog" class="guide-dialog"><div class="dialog-heading"><h2>让试穿效果更自然。</h2><button class="icon-button" data-close="guide-dialog" aria-label="关闭使用指南">${icon("close")}</button></div><ol><li><strong>拍一段真实的你。</strong><p>建议 5 秒，最长 10 秒。保持单人、明亮、无遮挡；试下装时让腿部完整入镜。</p></li><li><strong>选一张清晰画面。</strong><p>视频输入生成同长度视频，照片输入生成照片。视频封面只用于缩略图。</p></li><li><strong>添加想试的单品。</strong><p>粘贴商品链接或上传清晰正面图片。页面需要登录、验证码或无法读取时，补传图片即可。</p></li><li><strong>试好了，再去购买。</strong><p>保存照片或短片，点击商品入口前往商家。上传图片时也可以在链接栏补充购买链接。</p></li></ol><p class="guide-privacy">视频素材的画面会实时传给 XMAX，音频不发送；照片素材以静态画面流处理。视频封面只用于缩略图。服饰参考图上传至 XMAX 存储，第三方保存规则见其隐私政策。本应用不保存人物和结果素材，刷新页面后需重新上传。</p><a href="https://22duck.cn/docs/resources/privacy/" target="_blank" rel="noopener noreferrer">查看 XMAX 隐私政策 ↗</a><p class="field-note">配饰与多件组合效果仍需逐款确认；试穿图片不能替代真实尺码判断。</p></dialog>`;
+<dialog id="guide-dialog" class="guide-dialog"><div class="dialog-heading"><h2>让试穿效果更自然。</h2><button class="icon-button" data-close="guide-dialog" aria-label="关闭使用指南">${icon("close")}</button></div><ol><li><strong>拍一段真实的你。</strong><p>建议 5 秒，最长 10 秒。保持单人、明亮、无遮挡；试下装时让腿部完整入镜。</p></li><li><strong>选一张清晰画面。</strong><p>视频输入生成同长度视频，照片输入生成照片。视频封面只用于缩略图。</p></li><li><strong>添加想试的单品。</strong><p>粘贴商品链接或上传清晰正面图片。页面需要登录、验证码或无法读取时，补传图片即可。</p></li><li><strong>试好了，再去购买。</strong><p>保存照片或短片，点击商品入口前往商家。上传图片时也可以在链接栏补充购买链接。</p></li></ol><p class="guide-privacy">视频素材的画面会实时传给 XMAX，音频不发送；照片素材以静态画面流处理。视频封面只用于缩略图。服饰参考图上传至 XMAX 存储，第三方保存规则见其隐私政策。本应用不保存人物和结果素材，刷新页面后需重新上传。</p><p id="demo-attribution" class="field-note" hidden>示例牛仔裤照片：A Continuous Lean，<a href="https://commons.wikimedia.org/wiki/File:Tellason_jeans,_front.jpg" target="_blank" rel="noopener noreferrer">原图</a> · <a href="https://creativecommons.org/licenses/by/2.0/" target="_blank" rel="noopener noreferrer">CC BY 2.0</a>，已缩小尺寸。</p><a href="https://22duck.cn/docs/resources/privacy/" target="_blank" rel="noopener noreferrer">查看 XMAX 隐私政策 ↗</a><p class="field-note">配饰与多件组合效果仍需逐款确认；试穿图片不能替代真实尺码判断。</p></dialog>`;
 
 function status(message: string, error = false) {
   $("status").textContent = message;
@@ -378,6 +380,11 @@ function renderWardrobe() {
     button.onclick = () => choose(item);
     $("wardrobe").append(button);
   });
+  const chosen = Object.values(slots) as Garment[];
+  const low = chosen.filter((g) => g.width && g.height && Math.min(g.width, g.height) < 768);
+  $("garment-quality").hidden = !chosen.length;
+  $("garment-quality").textContent = chosen.map((g) => `${g.name} · ${g.width || "?"} × ${g.height || "?"}`).join("；")
+    + (low.length ? "。部分图片细节不足，建议更换最长边 1500～2000px 的清晰商品正面原图。" : "。已保留原图细节，避免截图、拼图与大面积留白。");
   $("catalog-note").textContent = config?.demoEnabled
     ? "本地参考单品"
     : "我的衣橱";
@@ -401,12 +408,13 @@ function purchaseLink(): string | undefined {
 async function uploadGarment(file: File) {
   if (busy || finishing || linkBusy) return;
   try {
-    await validateImage(file);
+    const dimensions = await validateImage(file);
     const item: Garment = {
       id: crypto.randomUUID(),
       name: file.name.replace(/\.[^.]+$/, ""),
       category,
       image: objectURL(file),
+      ...dimensions,
       file,
       purchaseUrl: purchaseLink(),
       accessory:
@@ -449,11 +457,12 @@ $("link-form").onsubmit = async (event) => {
       "product.jpg",
       { type: product.dataUrl.match(/^data:([^;]+)/)?.[1] || "image/jpeg" },
     );
-    await validateImage(file);
+    const dimensions = await validateImage(file);
     const item: Garment = {
       id: crypto.randomUUID(),
       name: product.title,
       image: objectURL(file),
+      ...dimensions,
       file,
       category: selectedCategory,
       purchaseUrl: url,
@@ -765,6 +774,7 @@ async function end(error?: string) {
           .then((value) => value.revoked !== false, () => false)
       : Promise.resolve(true);
     const saved = await current?.stop();
+    error ||= saved?.failure;
     if (saved?.photo && (!source?.isVideo || saved.video)) result = saved;
     if (result?.video) resultURL = objectURL(result.video);
     ticket = undefined;
@@ -777,6 +787,8 @@ async function end(error?: string) {
     } else {
       $("remote").hidden = true;
       showOriginal(!!source);
+      $("stage-label").innerHTML = `${icon("person")}原始素材 · 未生成结果`;
+      $("stage-caption").textContent = "当前显示原始素材，尚未生成可保存的试穿结果。";
     }
     const partial = !!result?.video && !result.complete;
     const dimensions = result ? `${result.width} × ${result.height}` : "";
@@ -789,7 +801,7 @@ async function end(error?: string) {
     window.dispatchEvent(new CustomEvent("xmirror:metrics", {detail: {
       width: result?.width, height: result?.height, duration: result?.duration,
       sourceDuration: source?.duration, complete: result?.complete,
-      clickToFirstFrameMs, startupMs: result?.startupMs, timing: result?.timing, transport: result?.transport,
+      remoteUserID: result?.remoteUserID, clickToFirstFrameMs, startupMs: result?.startupMs, timing: result?.timing, transport: result?.transport,
     }}));
     // Present the saved media before network cleanup completes; keep new sessions locked.
     await current?.cleanup;
@@ -871,7 +883,7 @@ $("start").onclick = async () => {
         if (valid()) void end(error);
       },
     );
-    $("remote").hidden = false;
+    $("remote").hidden = true;
     await session.start(
       next,
       source,
@@ -935,7 +947,14 @@ void (async () => {
     await refreshConfig();
     const data = await api<{ items: Garment[] }>("/api/catalog");
     catalog = data.items;
+    await Promise.all(catalog.map(async (item) => {
+      try {
+        const image = await loadImage(item.image);
+        item.width = image.naturalWidth; item.height = image.naturalHeight;
+      } catch { /* Broken references remain visible for replacement. */ }
+    }));
     $("demo-models").hidden = !config?.demoEnabled;
+    $("demo-attribution").hidden = !config?.demoEnabled;
     renderWardrobe();
     if (config?.demoEnabled) {
       const response = await fetch("/demo/studio.mp4");

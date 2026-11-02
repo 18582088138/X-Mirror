@@ -55,7 +55,7 @@ npm run prepare:demo
 
 ## API 与费用控制
 
-使用官方 `@xmaxai/web-sdk` 的 `RealtimeModel.x2_1`，通过 `createExternalVideoStream` 传入高清 Canvas 轨道：照片绘制静态完整图像，视频播放原始动作、保留完整内容并补边，不循环输入。服饰图通过 SDK 的存储服务上传，然后使用 `RealtimeContext` 开始生成。浏览器只收到受限临时密钥。
+使用官方 `@xmaxai/web-sdk` 的 `RealtimeModel.x2_1`，通过 `createExternalVideoStream` 传入高清 Canvas 轨道：照片绘制静态完整图像，视频播放原始动作、保留完整内容并补边，不循环输入。服饰图通过 SDK 的存储服务上传，然后使用 `RealtimeContext` 开始生成。预览只使用 `setRemoteMediaTracksListener` 提供的原始远端视频轨道，录制对该远端画面按浏览器时钟重采样；支持 WebCodecs 的浏览器使用显式帧时间戳编码，其他浏览器使用 MediaRecorder 兼容路径，SDK 视图留在屏幕外完成启动统计。没有远端结果时保持原始素材预览；停止后明确标记“原始素材 · 未生成结果”。浏览器只收到受限临时密钥。
 
 后端通过官方接口 `POST /temporary-api-key` 签发密钥，通过 `PUT /temporary-api-key/:key/inactive` 撤销。国内接口基址为 `https://cloud.xmax.22duck.cn/open/api/v1`，海外为 `https://api.xmax.ai/open/api/v1`。
 
@@ -71,11 +71,17 @@ npm run prepare:demo
 
 `XMAX_PROXY_URL` 只配置 Node 后端 HTTP 请求。浏览器的 SDK 请求与 WebRTC 仍需要可工作的网络；只配置后端代理不保证实时媒体能连接。
 
+## 服饰参考图
+
+单品参考图保留原始尺寸，最长边上限 2048 像素，使用较高 JPEG 质量；多单品参考拼图高度 2048，每列至少 768 像素宽。界面显示所选单品实际尺寸，对低清图给出换图建议。推荐商品正面原图最长边 1500～2000px，完整衣服、主体占比大、纹理清楚；800px 图可试用，但小图案和五金细节更容易丢失。直接放大小图无法补回原始细节。
+
+本地内置服饰不再从 GUI 小截图放大：外套、裙子从官方原始素材提取，帽子保留原图尺寸，牛仔裤使用真实高清照片缩小至约 2048px。运行 `prepare:demo` 时仅在本地缺少牛仔裤原图时下载，网络代理沿用 `XMAX_PROXY_URL`。示例牛仔裤作者为 A Continuous Lean，来自 [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Tellason_jeans,_front.jpg)，授权 [CC BY 2.0](https://creativecommons.org/licenses/by/2.0/)，已缩小尺寸，署名也在本地使用指南中显示。素材仍不进入 Git。
+
 ## 画质、时长与响应时间（2026-11-02）
 
 X2.1 按输入比例选择高清画布：1920×1080、1080×1920、1408×1408、1152×1536 或 1536×1152。关闭 SDK 自动降档，编码优先保留分辨率，上行最高 8Mbps，浏览器结果录制设为 8Mbps。只修改本地文件流的 `videoFormat.width/height` 无法强制高清，因为 SDK 从文件读取真实媒体尺寸、下行不自动放大；因此这里使用高清外部 Canvas 输入。低清原素材放大无法恢复原本缺失的细节，实际返回尺寸仍以页面显示和文件探测为准，不对输出视频再放大冒充高清生成。
 
-输出类型由输入决定。录制计时从实际收到可解码画面开始，采用输入素材时长，不再使用固定 5/8 秒。WebM 写入实际录制时长，可播放和定位；浏览器定时、编码帧边界存在约一两帧误差。生成是实时流传输，短片时间轴长度匹配输入，但网络延迟和丢帧仍可能影响动作对应，不能当作离线逐帧编辑。源视频首帧在连接预热期间保持，收到画面后才播放原片一次。
+输出类型由输入决定。录制计时从实际收到可解码画面开始，采用输入素材时长，不再使用固定 5/8 秒。RTC 轨道的时间戳可能不连续，因此通过 Canvas 与 WebCodecs 显式帧时间戳录制远端画面（不支持时使用 MediaRecorder），WebM 写入实际录制时长，可播放和定位；重复画面只保留停顿，不代表模型帧率提高；浏览器定时、编码帧边界存在约一两帧误差。生成是实时流传输，短片时间轴长度匹配输入，但网络延迟和丢帧仍可能影响动作对应，不能当作离线逐帧编辑。源视频首帧在连接预热期间保持，收到画面后才播放原片一次。
 
 [官方实时视频说明](https://22duck.cn/docs/capabilities/realtime-video) 的约 200ms 指实时生成的端到端延迟，不等于签发密钥、上传参考图、建立 RTC 连接以及录完整短片的总时长。网页记录点击到首帧、SDK 启动分阶段耗时和 RTC 媒体延迟估计，事件为 `xmirror:first-frame`、`xmirror:metrics`；RTC 估计也不能用来证明 AI 端到端 200ms。SDK 提前加载，人物准备与服饰上传并行，结果在后台关闭连接和撤销密钥完成前即可显示；新任务仍等待清理完成。启动阶段仍受网络、代理、供应商会话创建及资源等待影响，未承诺 200ms 首帧。
 

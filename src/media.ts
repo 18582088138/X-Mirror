@@ -14,6 +14,8 @@ export type Garment = {
   category: Category;
   image: string;
   detail?: string;
+  width?: number;
+  height?: number;
   accessory?: string;
   file?: File;
   purchaseUrl?: string;
@@ -75,7 +77,7 @@ export function canvasBlob(canvas: HTMLCanvasElement, quality = 0.9) {
     ),
   );
 }
-export async function imageFile(src: string, name = "image.jpg", max = 1280) {
+export async function imageFile(src: string, name = "image.jpg", max = 2048) {
   const image = await loadImage(src);
   const scale = Math.min(1, max / Math.max(image.width, image.height));
   const canvas = document.createElement("canvas");
@@ -85,7 +87,7 @@ export async function imageFile(src: string, name = "image.jpg", max = 1280) {
   ctx.fillStyle = "#fff";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-  return new File([await canvasBlob(canvas)], name, { type: "image/jpeg" });
+  return new File([await canvasBlob(canvas, 0.95)], name, { type: "image/jpeg" });
 }
 export async function validateImage(file: File) {
   if (!["image/jpeg", "image/png", "image/webp"].includes(file.type))
@@ -96,6 +98,7 @@ export async function validateImage(file: File) {
     const img = await loadImage(url);
     if (Math.min(img.width, img.height) < 64)
       throw new Error("图片至少需要 64 × 64 像素");
+    return { width: img.naturalWidth, height: img.naturalHeight };
   } finally {
     URL.revokeObjectURL(url);
   }
@@ -184,10 +187,10 @@ export async function buildReference(garments: Garment[], poster: string) {
       layout: `参考图为${labels[garments[0].category]}${garments[0].accessory ? `（${garments[0].accessory}）` : ""}`,
     };
   const person = await loadImage(poster);
-  const height = 1280;
+  const height = 2048;
   const width = Math.max(
-    640,
-    Math.min(1600, Math.round((height * person.width) / person.height)),
+    768 * garments.length,
+    Math.min(3072, Math.round((height * person.width) / person.height)),
   );
   const canvas = document.createElement("canvas");
   canvas.width = width;
@@ -231,7 +234,7 @@ export async function buildReference(garments: Garment[], poster: string) {
   };
 }
 export function buildPrompt(garments: Garment[], layout: string) {
-  return `将参考图中的服饰穿戴到视频人物身上，跟随人物原有动作。${layout}。只更换${garments.map((g) => labels[g.category] + (g.accessory || "")).join("、")}，保持人物面容、身份、发型、体型、姿势、背景和其余衣物不变。准确保留商品颜色、版型、纹理、图案与细节，呈现自然的布料和光影。参考图中的文字标签和白底不要出现在生成画面中。`;
+  return `将参考图中的服饰穿戴到视频人物身上，跟随人物原有动作。${layout}。只更换${garments.map((g) => labels[g.category] + (g.accessory || "")).join("、")}，保持人物面容、身份、发型、体型、姿势、背景和其余衣物不变。准确保留商品颜色、版型、纹理、图案与细节，呈现自然的布料和光影。参考图的背景、文字标签与展示道具不要出现在生成画面中。`;
 }
 export async function normalizeRecording(
   blob: Blob,

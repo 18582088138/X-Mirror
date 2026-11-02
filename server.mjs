@@ -52,10 +52,10 @@ const rates = new Map();
 const demoCatalog = [
   {
     id: "sweatshirt",
-    name: "XMAX 经典卫衣",
+    name: "学院风西装外套",
     category: "top",
     image: "/demo/sweatshirt.jpg",
-    detail: "日常休闲 · 黑色",
+    detail: "清晰参考 · 黑色",
   },
   {
     id: "shirt",
@@ -66,14 +66,14 @@ const demoCatalog = [
   },
   {
     id: "jeans",
-    name: "直筒阔腿牛仔裤",
+    name: "直筒原色牛仔裤",
     category: "bottom",
     image: "/demo/jeans.jpg",
-    detail: "自在随行 · 浅蓝",
+    detail: "丹宁纹理 · 深蓝",
   },
   {
     id: "skirt",
-    name: "百褶短裙",
+    name: "学院风百褶短裙",
     category: "bottom",
     image: "/demo/skirt.jpg",
     detail: "运动学院 · 墨黑",

@@ -10,7 +10,7 @@ const cases = (
 ).split(",");
 if (
   cases.some(
-    (name) => !["top", "bottom", "hat", "combo", "video", "image"].includes(name),
+    (name) => !["top", "bottom", "hat", "combo", "video", "image", "man"].includes(name),
   )
 )
   throw new Error("未知验证类别");
@@ -61,13 +61,13 @@ try {
       });
       if (await remove.count()) await remove.click();
     }
-    if (name === "hat" || name === "video") {
+    if (name === "hat" || name === "video" || name === "man") {
       await page.locator("#source-open").click();
-      await page.locator('[data-model="woman"]').click();
+      await page.locator(name === "man" ? '[data-model="man"]' : '[data-model="woman"]').click();
       await page.waitForFunction(() =>
         document
           .querySelector("#source-name")
-          .textContent.includes("半身参考视频"),
+          .textContent.includes("参考"),
       );
       await page.locator("#source-done").click();
     } else {
@@ -84,7 +84,7 @@ try {
       await page.waitForFunction(() => document.querySelector("#source-description").textContent.includes("照片"));
       await page.locator("#source-done").click();
     }
-    if (["top", "combo", "video", "image"].includes(name)) {
+    if (["top", "combo", "video", "image", "man"].includes(name)) {
       await page.locator('[data-category="top"]').click();
       await page
         .getByRole("button", { name: "试穿条纹短款外套", exact: true })
@@ -93,7 +93,7 @@ try {
     if (["bottom", "combo"].includes(name)) {
       await page.locator('[data-category="bottom"]').click();
       await page
-        .getByRole("button", { name: "试穿直筒阔腿牛仔裤", exact: true })
+        .getByRole("button", { name: "试穿直筒原色牛仔裤", exact: true })
         .click();
     }
     if (name === "hat" || name === "combo") {
@@ -101,6 +101,11 @@ try {
       await page
         .getByRole("button", { name: "试穿白色棒球帽", exact: true })
         .click();
+    }
+    if (name === "man") {
+      await page.locator('[data-category="top"]').click();
+      await page.locator("#garment-file").setInputFiles("public/demo/jacket.jpg");
+      await page.waitForFunction(() => document.querySelector("#slots").textContent.includes("jacket"));
     }
     await page.locator("#start").waitFor({ state: "visible" });
     assert.equal(

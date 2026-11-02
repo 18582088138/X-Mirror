@@ -118,7 +118,17 @@ try {
   await page.locator("#consent").check();
   finishDelay = 1500;
   await page.locator("#start").click();
-  await page.locator("#result-video").waitFor({state: "visible"});
+  try { await page.locator('#remote video[data-origin="xmax-remote"]').waitFor({state: "visible"}); }
+  catch (error) {
+    console.log(JSON.stringify({ status: await page.locator("#status").textContent(), errors }));
+    throw error;
+  }
+  assert.equal(await page.locator("#person-video").isHidden(), true);
+  try { await page.locator("#result-video").waitFor({state: "visible"}); }
+  catch (error) {
+    console.log(JSON.stringify({ status: await page.locator("#status").textContent(), errors }));
+    throw error;
+  }
   assert.equal(await page.locator("#start").isDisabled(), true);
   await page.waitForFunction(() => !document.querySelector("#start").disabled);
   assert.equal(await page.locator("#result-video").isVisible(), true);
@@ -139,6 +149,15 @@ try {
   await page.locator("#compare").click();
   assert.equal(await page.locator("#person-video").isVisible(), true);
   await page.locator("#compare").click();
+
+  const referenceSize = await page.evaluate(async () => {
+    const { imageFile } = await import("/src/media.ts");
+    const file = await imageFile("/demo/jeans.jpg");
+    const image = await createImageBitmap(file);
+    const size = [image.width, image.height]; image.close(); return size;
+  });
+  assert.equal(Math.max(...referenceSize), 2048);
+  assert.match(await page.locator("#garment-quality").textContent(), /\d+ × \d+/);
 
   // Link import renders user text safely; buying is an explicit link binding.
   await page.locator("#product-url").fill("https://shop.example/item");
@@ -213,6 +232,10 @@ try {
     Number(metadata.format.duration) > 7.85 &&
       Number(metadata.format.duration) < 8.15,
   );
+  const timeline = spawnSync("ffprobe", ["-v", "error", "-show_entries", "frame=best_effort_timestamp_time", "-of", "json", ".local/verification/test-only-video.webm"], {encoding:"utf8"});
+  const frameTimes = JSON.parse(timeline.stdout).frames.map((f) => Number(f.best_effort_timestamp_time));
+  assert.ok(Math.max(...frameTimes) > 7.7 && Math.max(...frameTimes) < 8.15, "encoded frames must span the real eight-second timeline");
+  assert.ok(frameTimes.every((t,i) => i === 0 || t >= frameTimes[i-1]));
   assert.equal(await page.locator("#shopping").isVisible(), true);
   assert.equal(
     await page.locator("#shopping-items a").getAttribute("href"),
@@ -268,6 +291,8 @@ try {
   // Unsupported recording must not quietly turn a video request into an image.
   const supported = await page.evaluate(() => {
     globalThis.savedSupport = MediaRecorder.isTypeSupported;
+    globalThis.savedEncoder = globalThis.VideoEncoder;
+    globalThis.VideoEncoder = undefined;
     MediaRecorder.isTypeSupported = () => false;
     return true;
   });
@@ -277,7 +302,19 @@ try {
   assert.match(await page.locator("#status").textContent(), /录制格式/);
   assert.equal(await page.locator("#result-actions").isHidden(), true);
   assert.equal(await page.locator("#result-photo").isHidden(), true);
-  await page.evaluate(() => { MediaRecorder.isTypeSupported = globalThis.savedSupport; });
+  await page.evaluate(() => { MediaRecorder.isTypeSupported = globalThis.savedSupport; globalThis.VideoEncoder = globalThis.savedEncoder; });
+
+  // A local preview with no raw remote result must never trigger recording or a live label.
+  await page.evaluate(() => { globalThis.mockNoRemote = true; });
+  await page.locator("#start").click();
+  await page.waitForTimeout(400);
+  assert.equal(await page.locator("#stage-label").textContent(), "人物预览");
+  await page.locator("#stop").click();
+  await page.waitForFunction(() => !document.querySelector("#start").disabled);
+  assert.match(await page.locator("#stage-label").textContent(), /原始素材.*未生成结果/);
+  assert.equal(await page.locator("#result-actions").isHidden(), true);
+  assert.equal(await page.locator("#person-video").isVisible(), true);
+  await page.evaluate(() => { globalThis.mockNoRemote = false; });
 
   const long = ".local/verification/too-long.mp4";
   const made = spawnSync("ffmpeg", [
@@ -305,7 +342,7 @@ try {
   );
   await page.locator("#source-done").click();
   assert.deepEqual(errors, []);
-  assert.equal(starts, 5);
+  assert.equal(starts, 6);
   const report = {
     success: true,
     realApiCalls: 0,
@@ -319,6 +356,10 @@ try {
       "image input produces image only",
       "results visible before delayed revocation",
       "recording failure does not fall back to image",
+      "raw remote output selected over SDK local preview",
+      "encoded frame timestamps span 8 seconds and remain monotonic",
+      "2048px garment reference and dimension hints",
+      "no remote result restores original label",
       "original comparison",
       "safe product import",
       "parse fallback and purchase link",

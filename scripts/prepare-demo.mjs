@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, copyFileSync, unlinkSync } from "node:fs";
+import { loadEnv } from "vite";
 import { spawnSync } from "node:child_process";
 mkdirSync("public/demo", { recursive: true });
 mkdirSync("public/brand", { recursive: true });
@@ -59,29 +60,35 @@ if (existsSync("ref_material/网站试衣服.mov")) {
 }
 if (existsSync("public/demo/studio.jpg")) unlinkSync("public/demo/studio.jpg");
 image(
-  "ref_material/GUI-reference.png",
+  "ref_material/materials/references/outfit.png",
   "public/demo/sweatshirt.jpg",
-  "crop=113:90:715:465,scale=565:450",
+  "crop=700:850:650:110",
 );
+// Genuine original photograph, downloaded separately with its attribution.
+if (!existsSync("ref_material/garments/tellason-jeans.jpg")) {
+  mkdirSync("ref_material/garments", { recursive: true });
+  const proxy = process.env.XMAX_PROXY_URL || loadEnv("development", process.cwd(), "").XMAX_PROXY_URL;
+  const download = spawnSync(process.platform === "win32" ? "curl.exe" : "curl", ["-f", "-sS", "-L", "--max-time", "45",
+    ...(proxy ? ["--proxy", proxy] : []),
+    "https://upload.wikimedia.org/wikipedia/commons/c/c2/Tellason_jeans%2C_front.jpg",
+    "-o", "ref_material/garments/tellason-jeans.jpg"], { encoding: "utf8" });
+  if (download.status !== 0) throw new Error("高清牛仔裤素材下载失败，请检查网络后重新准备素材");
+}
+image("ref_material/garments/tellason-jeans.jpg", "public/demo/jeans.jpg", "scale=2048:-1");
 image(
-  "ref_material/GUI-reference.png",
-  "public/demo/jeans.jpg",
-  "crop=111:90:843:465,scale=555:450",
-);
-image(
-  "ref_material/GUI-reference.png",
+  "ref_material/materials/references/outfit.png",
   "public/demo/skirt.jpg",
-  "crop=111:90:1104:465,scale=555:450",
+  "crop=650:270:680:950",
 );
 image(
   "ref_material/materials/references/top.png",
   "public/demo/top.jpg",
-  "crop=1150:760:220:0,scale=690:456",
+  "crop=1150:760:220:0",
 );
 image(
   "ref_material/materials/references/hat.jpg",
   "public/demo/hat.jpg",
-  "scale=600:-1",
+  "scale=iw:ih",
 );
 image(
   "ref_material/materials/references/person.png",
