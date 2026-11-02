@@ -2,11 +2,11 @@ import { readFile, writeFile, mkdir, stat, rename } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { fetch, ProxyAgent } from 'undici';
-import { loadEnv } from 'vite';
+import { loadSharedEnv } from '../server/env.mjs';
 import { command } from '../server/storage.mjs';
 
 process.chdir(fileURLToPath(new URL('..', import.meta.url)));
-const env = { ...loadEnv('development', process.cwd(), ''), ...process.env };
+const env = loadSharedEnv();
 const presets = JSON.parse(await readFile('public/presets.json', 'utf8'));
 const sources = JSON.parse(await readFile('public/materials/sources.json', 'utf8'));
 const checkOnly = process.argv.includes('--check');

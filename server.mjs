@@ -20,7 +20,7 @@ const publicOrigin = env.PUBLIC_ORIGIN
   : undefined;
 const demoEnabled =
   env.ENABLE_LOCAL_DEMO === "1" ||
-  (!publicOrigin && !production && env.ENABLE_LOCAL_DEMO !== "0");
+  (!publicOrigin && env.ENABLE_LOCAL_DEMO !== "0");
 const proxy = env.XMAX_PROXY_URL
   ? new ProxyAgent(env.XMAX_PROXY_URL)
   : undefined;

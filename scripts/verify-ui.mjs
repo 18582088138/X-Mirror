@@ -33,7 +33,7 @@ try {
     finishes = 0,
     delay = 0,
     finishDelay = 0,
-    sessionSeconds = 30;
+    sessionSeconds = 40;
   const img = `data:image/jpeg;base64,${(await readFile("public/demo/sweatshirt.jpg")).toString("base64")}`;
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;

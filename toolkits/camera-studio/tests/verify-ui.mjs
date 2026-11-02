@@ -1,16 +1,18 @@
 import { chromium } from '@playwright/test';
 import { spawn } from 'node:child_process';
+import http from 'node:http';
+import { createReadStream } from 'node:fs';
 import { mkdir, readFile, writeFile, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadEnv } from 'vite';
+import { loadSharedEnv } from '../server/env.mjs';
 import assert from 'node:assert/strict';
 import { command } from '../server/storage.mjs';
 
 process.chdir(fileURLToPath(new URL('..', import.meta.url)));
 const real = process.argv.includes('--real-api');
-const env = { ...loadEnv('development', process.cwd(), ''), ...process.env };
-if (real && !env.XMAX_API_KEY?.trim()) throw new Error('真实验证需要在 toolkit 的 .env 中配置 XMAX_API_KEY');
+const env = loadSharedEnv();
+if (real && !env.XMAX_API_KEY?.trim()) throw new Error('真实验证需要在仓库根目录 .env 中配置 XMAX_API_KEY');
 const cameraFile = env.STUDIO_TEST_CAMERA_FILE ? resolve(env.STUDIO_TEST_CAMERA_FILE) : resolve('tests/camera.y4m');
 if (!(await stat(cameraFile).catch(() => undefined))) {
   if (real) throw new Error('真实验证请用 STUDIO_TEST_CAMERA_FILE 提供人物 Y4M 视频；普通 UI 检查会自动生成合成摄像头输入');
@@ -19,7 +21,19 @@ if (!(await stat(cameraFile).catch(() => undefined))) {
 const port = real ? 5197 : 5196, base = `http://127.0.0.1:${port}`;
 const outputDir = real ? '.local/live-output' : '.local/ui-output';
 await mkdir('.local', { recursive: true });
-const server = spawn(process.execPath, ['server.mjs'], { windowsHide: true, env: { ...process.env, XMAX_API_KEY: real ? env.XMAX_API_KEY : 'uk-ui-test-only', STUDIO_TEST: '1', STUDIO_OUTPUT_DIR: outputDir, PORT: String(port) }, stdio: ['ignore', 'pipe', 'pipe'] });
+// 模拟离线任务服务：第一次查询处于 processing，之后 completed 并返回一段合成视频。
+let offlinePosts = 0, offlinePolls = 0;
+const fakeResult = resolve('.local/fake-offline-result.mp4');
+if (!real) await command(env.FFMPEG_PATH || 'ffmpeg', ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=640x360:rate=30', '-t', '3', '-pix_fmt', 'yuv420p', '-c:v', 'libx264', fakeResult]);
+const fake = http.createServer((req, res) => {
+  const json = data => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ success: true, code: 200, data })); };
+  if (req.method === 'POST' && req.url.endsWith('/offline-task')) { offlinePosts++; req.resume(); return json({ uid: 'task-' + offlinePosts, status: 'submitted' }); }
+  if (req.method === 'GET' && req.url.includes('/offline-task/')) { offlinePolls++; return json({ uid: req.url.split('/').pop(), status: offlinePolls % 2 ? 'processing' : 'completed', result: offlinePolls % 2 ? undefined : { result_url: 'http://127.0.0.1:5198/result.mp4' } }); }
+  if (req.url === '/result.mp4') { res.writeHead(200, { 'Content-Type': 'video/mp4' }); return createReadStream(fakeResult).pipe(res); }
+  res.writeHead(404); res.end();
+});
+if (!real) await new Promise(done => fake.listen(5198, '127.0.0.1', done));
+const server = spawn(process.execPath, ['server.mjs'], { windowsHide: true, env: { ...process.env, ...(real ? {} : { XMAX_PROXY_URL: '', XMAX_OFFLINE_API_BASE_URL: 'http://127.0.0.1:5198/open/api/v1', XMAX_OFFLINE_POLL_MS: '300' }), XMAX_API_KEY: real ? env.XMAX_API_KEY : 'uk-ui-test-only', STUDIO_TEST: '1', STUDIO_OUTPUT_DIR: outputDir, CAMERA_STUDIO_PORT: String(port) }, stdio: ['ignore', 'pipe', 'pipe'] });
 let serverError = ''; server.stderr.on('data', data => { serverError += data; });
 let browser;
 const pause = ms => new Promise(r => setTimeout(r, ms));
@@ -54,7 +68,7 @@ try {
   assert.ok(Number(sourceProbe.format.duration) <= 3.1, 'saved input respects requested 3-second bound');
   const range = await fetch(base + sourceUrl, { headers: { Range: 'bytes=0-99' } }); assert.equal(range.status, 206); assert.equal((await range.arrayBuffer()).byteLength, 100);
   await page.locator('[data-id="hat"] .material-use').click();
-  await page.waitForFunction(id => document.querySelector('#output-badge').textContent === '已保存' && document.querySelector('#output-download').getAttribute('href')?.startsWith(`/media/${id}/runs/`), currentClipId, { timeout: real ? 150000 : 30000 });
+  await page.waitForFunction(id => document.querySelector('#output-badge').textContent === '已保存' && document.querySelector('#output-download').getAttribute('href')?.startsWith(`/media/${id}/runs/`), currentClipId, { timeout: real ? 540000 : 30000 });
   const output = await page.locator('#output-download').getAttribute('href'); assert.ok(output.includes('/runs/')); assert.notEqual(output, sourceUrl);
   await page.waitForFunction(() => document.querySelector('#output-video').readyState >= 2);
   assert.ok(await page.locator('#output-video').evaluate(video => video.videoWidth > 0));
@@ -72,7 +86,7 @@ try {
     // Cancel while key issuance is pending; the late lease must be released.
     delay = 1500; await page.locator('[data-id="face"] .material-use').click();
     await page.waitForFunction(() => !document.querySelector('#cancel').disabled); await page.locator('#cancel').click(); await pause(2300);
-    assert.equal(starts, 3); assert.equal(finishes, 3);
+    assert.equal(starts, 3); assert.equal(finishes, 3); assert.equal(offlinePosts, 2, 'cancelled run never submits a paid task');
     // Verify the upper capture limit and device shutdown.
     await page.locator('#camera').click(); await page.waitForFunction(() => !document.querySelector('#record').disabled);
     await page.locator('#duration').fill('10'); await page.locator('#duration').dispatchEvent('input'); await page.locator('#record').click();
@@ -87,4 +101,4 @@ try {
   const report = { mode: real ? 'real' : 'mock', verifiedAt: new Date().toISOString(), sourceUrl, output, latest, starts, finishes, errors };
   await writeFile(`.local/${real ? 'live' : 'ui'}-verification.json`, JSON.stringify(report, null, 2));
   console.log(`PASS ${real ? 'real X2.1' : 'mock'}: camera capture, preset click, on-disk input/output, playable replay${real ? '' : ', repeated edits, persistence, late-key cancellation, 3/10-second bounds, mobile layout'}.`);
-} finally { await browser?.close(); server.kill(); }
+} finally { await browser?.close(); server.kill(); fake.close(); }

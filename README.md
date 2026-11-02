@@ -7,9 +7,7 @@ XMAX X2.1 驱动的轻量网页虚拟试衣间。手机与电脑通过浏览器�
 [Camera Studio](toolkits/camera-studio/README.md) 支持摄像头录制 3～10 秒短片、右侧素材与提示词、Xmax X2.1 生成、本地自动保存及历史回放。位于 `toolkits/camera-studio`，使用独立配置和输出目录，默认端口 5190。
 
 ```powershell
-# 首次配置，已有文件时不要覆盖
-Copy-Item toolkits/camera-studio/.env.example toolkits/camera-studio/.env
-# 填写 toolkit 的 XMAX_API_KEY，按需配置代理
+# 与 X-Mirror 共用根目录 .env（只有端口不同：PORT=5180，CAMERA_STUDIO_PORT=5190）
 npm run toolkit:camera:setup
 npm run toolkit:camera
 ```
@@ -99,7 +97,7 @@ npm start
 
 公开部署时使用 HTTPS 反向代理，并将 `PUBLIC_ORIGIN` 配置为实际站点的完整来源，例如 `https://mirror.example.com`。该值用于访问主机和跨来源请求校验。
 
-生产模式默认禁用本地演示素材。确需在私人测试实例展示参考素材时设置 `ENABLE_LOCAL_DEMO=1`。官方演示素材未声明开放授权，不要将它们作为可公开分发的商品或模特素材。
+本地预置的模特视频和服饰默认在 `npm run dev` 与 `npm start` 下都会加载，启动后无需手动添加；配置了 `PUBLIC_ORIGIN` 的公开部署默认关闭，设 `ENABLE_LOCAL_DEMO=0` 也可关闭，公开实例确需展示时设 `ENABLE_LOCAL_DEMO=1`。官方演示素材未声明开放授权，不要将它们作为可公开分发的商品或模特素材。
 
 服务端额度日志需要持久磁盘，首版只支持一个 Node 进程。多进程部署需要共享预算和会话锁。不要为增加额度而删除当日额度日志。
 
