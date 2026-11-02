@@ -128,3 +128,25 @@ test("validate source duration before reserving budget; retain a full ten-second
   assert.equal(ticket.outputSeconds, 10);
   await api.finish("visitor", ticket.lease);
 });
+
+
+test("explicit unlimited testing allows exhausted owners while retaining session protections", async (t) => {
+  const { api, calls, options } = setup(t, {
+    XMAX_DISABLE_DAILY_LIMITS: "1",
+    XMAX_DAILY_POINTS_LIMIT: "100",
+    XMAX_VISITOR_DAILY_LIMIT: "1",
+  });
+  const firstId = randomUUID();
+  for (let i = 0; i < 3; i++) {
+    const ticket = await api.start("visitor", i === 0 ? firstId : randomUUID(), 8);
+    assert.equal(api.status("visitor").remaining, null);
+    await assert.rejects(api.start("visitor", randomUUID()), /正在使用/);
+    await api.finish("visitor", ticket.lease);
+  }
+  assert.equal(calls.filter((c) => c.method === "POST").length, 3);
+  assert.equal(JSON.parse(readFileSync(options.ledgerPath, "utf8")).length, 3);
+  await assert.rejects(api.start("visitor", firstId), /重复/);
+  const restarted = createApi(options);
+  assert.equal(restarted.status("visitor").remaining, null);
+  assert.equal(settings({ XMAX_DISABLE_DAILY_LIMITS: "1", XMAX_POINTS_PER_CASE: "500" }).points, 100);
+});

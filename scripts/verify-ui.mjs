@@ -39,7 +39,7 @@ try {
       data = {
         configured: true,
         active,
-        remaining: 5,
+        remaining: null,
         outputSeconds: 3,
         sessionSeconds: 15,
         demoEnabled: true,
@@ -80,6 +80,7 @@ try {
   );
   assert.equal(await page.locator("#start").isDisabled(), true);
   assert.equal(starts, 0);
+  assert.equal(await page.locator("#quota").textContent(), "测试次数不限");
   await page.locator("#person-video").waitFor({ state: "visible" });
   await page.waitForFunction(
     () =>

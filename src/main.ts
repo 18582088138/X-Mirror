@@ -17,7 +17,7 @@ import type { TryOnSession, Ticket, Result } from "./provider";
 type Config = {
   configured: boolean;
   active: boolean;
-  remaining: number;
+  remaining: number | null;
   outputSeconds: number;
   sessionSeconds: number;
   pointsPerSession: number;
@@ -151,7 +151,7 @@ function controls() {
     linkBusy ||
     !config?.configured ||
     !!config.active ||
-    config.remaining <= 0 ||
+    (config.remaining !== null && config.remaining <= 0) ||
     !source ||
     !Object.values(slots).length ||
     !$<HTMLInputElement>("consent").checked;
@@ -161,7 +161,7 @@ function controls() {
   $<HTMLButtonElement>("mode-video").disabled = true;
   $<HTMLButtonElement>("mode-photo").disabled = true;
   $("quota").textContent = config?.configured
-    ? `今日可试 ${config.remaining} 次`
+    ? config.remaining === null ? "测试次数不限" : `今日可试 ${config.remaining} 次`
     : "";
   $("engine-dot").classList.toggle("ready", !!config?.configured);
 }

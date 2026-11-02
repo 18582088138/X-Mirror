@@ -36,6 +36,7 @@ export function settings(env) {
   return {
     environment,
     base,
+    disableDailyLimits: env.XMAX_DISABLE_DAILY_LIMITS === "1",
     outputSeconds: integer("XMAX_OUTPUT_SECONDS", 5, 3, 8),
     sessionSeconds: integer("XMAX_SESSION_SECONDS", 60, 15, 60),
     points: integer("XMAX_POINTS_PER_CASE", 100, 1, 100),
@@ -149,7 +150,7 @@ export function createApi({
         sessionSeconds: config.sessionSeconds,
         pointsPerSession: config.points,
         active: Boolean(active),
-        remaining: Math.max(
+        remaining: config.disableDailyLimits ? null : Math.max(
           0,
           Math.min(
             config.visitorLimit -
@@ -176,7 +177,7 @@ export function createApi({
       )
         throw new ApiError("此提交已处理，请勿重复生成", 409);
       if (active) throw new ApiError("试衣间正在使用中，请稍后再试", 409);
-      if (this.status(owner).remaining <= 0)
+      if (!config.disableDailyLimits && this.status(owner).remaining <= 0)
         throw new ApiError("今天的试穿额度已用完，请明天再来", 429);
       const entry = {
         id: randomUUID(),
