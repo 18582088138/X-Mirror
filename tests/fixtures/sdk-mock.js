@@ -41,6 +41,9 @@ export class XmaxClient {
       uploadImage: async () => ({
         url: "https://example.invalid/test-only.jpg",
       }),
+      uploadVideo: async () => ({
+        url: "https://example.invalid/test-only.mp4",
+      }),
     };
   }
   createRealtimeManager(configuration) {

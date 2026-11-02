@@ -18,6 +18,7 @@ import {
   type Garment,
 } from "./media";
 import type { TryOnSession, Ticket, Result } from "./provider";
+import type { OfflineSession } from "./offline-session";
 
 type Config = {
   configured: boolean;
@@ -31,6 +32,7 @@ type Config = {
 const $ = <T extends HTMLElement = HTMLElement>(id: string) =>
   document.getElementById(id) as T;
 const providerModule = import("./provider"); // Prefetch SDK only; no paid request.
+const offlineModule = import("./offline-session");
 let clickedAt = 0;
 let clickToFirstFrameMs: number | undefined;
 let config: Config | undefined;
@@ -46,7 +48,7 @@ let busy = false,
   comparing = false;
 let ticket: Ticket | undefined,
   pendingTicket: Promise<Ticket> | undefined,
-  session: TryOnSession | undefined;
+  session: TryOnSession | OfflineSession | undefined;
 let result: Result | undefined, resultURL: string | undefined;
 let hardTimer: ReturnType<typeof setTimeout> | undefined;
 let lastOutfit: Garment[] = [];
@@ -863,8 +865,9 @@ $("start").onclick = async () => {
   $("loading").hidden = false;
   $("loading-text").textContent = "正在准备你的新造型";
   status("正在整理搭配素材…");
+  const offlineVideo = source.isVideo;
   try {
-    const [reference, { TryOnSession }] = await Promise.all([buildReference(outfit), providerModule]);
+    const [reference, { TryOnSession }, { OfflineSession }] = await Promise.all([buildReference(outfit), providerModule, offlineModule]);
     if (!valid()) return;
     status("正在创建限额试穿会话…");
     pendingTicket = api<Ticket>("/api/start", {
@@ -876,8 +879,23 @@ $("start").onclick = async () => {
     ticket = next;
     hardTimer = setTimeout(
       () => void end("本次试穿已达到等待上限，未能完成生成。已停止会话，请手动重试；服务启动或连接耗时可能较长。"),
-      Math.max(1, next.sessionSeconds - 1) * 1000,
+      // 视频走离线任务，生成时间不受实时会话时长限制；照片仍受会话时长限制。
+      (offlineVideo ? 9 * 60 : Math.max(1, next.sessionSeconds - 1)) * 1000,
     );
+    const onStatusChange = (message: string) => {
+      if (valid()) {
+        status(message);
+        $("loading-text").textContent = message;
+      }
+    };
+    if (offlineVideo) {
+      const offlineSession = new OfflineSession(onStatusChange, (_result, error) => {
+        if (valid()) void end(error);
+      });
+      session = offlineSession;
+      await offlineSession.start(next, source, reference.file, buildPrompt(outfit, reference.layout));
+      return;
+    }
     session = new TryOnSession(
       $("remote"),
       (message) => {

@@ -7,6 +7,8 @@ import { createServer, loadEnv } from "vite";
 import { ProxyAgent, fetch as proxyFetch } from "undici";
 import { ApiError, createApi } from "./server/api.mjs";
 import { createProducts } from "./server/products.mjs";
+import { createOffline } from "./server/offline.mjs";
+import { createVideo } from "./server/video.mjs";
 import demoCatalog from "./src/demo-catalog.json" with { type: "json" };
 
 const production = process.argv.includes("--production");
@@ -28,6 +30,8 @@ const request = proxy
   ? (url, options) => proxyFetch(url, { ...options, dispatcher: proxy })
   : fetch;
 const api = createApi({ env, request, ledgerPath: ".local/sessions.json" });
+const offline = createOffline({ env, base: api.config.base, request });
+const video = createVideo({ env });
 const products = createProducts({ proxyRequest: proxy ? request : undefined });
 const hosts = new Set([
   `localhost:${port}`,
@@ -114,6 +118,26 @@ const server = http.createServer(async (req, res) => {
         return reply(200, { ...api.status(owner), demoEnabled });
       if (req.method === "GET" && path === "/api/catalog")
         return reply(200, { items: demoEnabled ? demoCatalog : [] });
+      if (req.method === "POST" && path === "/api/video/normalize") {
+        const type = String(req.headers["content-type"] || "").split(";")[0].trim();
+        const extension = { "video/mp4": "mp4", "video/webm": "webm", "video/quicktime": "mov" }[type];
+        if (!extension) throw new ApiError("仅支持 MP4 / WebM / MOV 视频");
+        const chunks = [];
+        let size = 0;
+        for await (const chunk of req) {
+          size += chunk.length;
+          if (size > 30 * 1024 * 1024) throw new ApiError("视频不能超过 30 MB", 413);
+          chunks.push(chunk);
+        }
+        const normalized = await video.normalize(Buffer.concat(chunks), extension).catch(() => {
+          throw new ApiError("视频转换失败，请换一段视频", 422);
+        });
+        if (!normalized) return reply(501, { error: "服务器未安装 FFmpeg，无法转换视频" });
+        res.statusCode = 200;
+        res.setHeader("Content-Type", "video/mp4");
+        res.setHeader("X-Video-Duration", String(normalized.duration));
+        return res.end(normalized.data);
+      }
       if (
         req.method !== "POST" ||
         !req.headers["content-type"]?.startsWith("application/json")
@@ -143,6 +167,16 @@ const server = http.createServer(async (req, res) => {
         return reply(200, await api.start(owner, data.requestId, data.sourceSeconds));
       if (path === "/api/finish")
         return reply(200, await api.finish(owner, data.lease));
+      if (path === "/api/offline")
+        return reply(200, await offline.submit(owner, data));
+      if (path === "/api/offline/status")
+        return reply(200, await offline.status(owner, data.uid));
+      if (path === "/api/offline/result") {
+        const output = await offline.result(owner, data.uid);
+        res.statusCode = 200;
+        res.setHeader("Content-Type", output.type);
+        return res.end(output.data);
+      }
       if (path === "/api/products/resolve")
         return reply(200, await products.resolve(data.url));
       if (path === "/api/products/image")

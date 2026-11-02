@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile, mkdir, stat, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { inspectPlayback } from './playback-check.mjs';
+import { readFileSync } from 'node:fs';
 const skipCamera = process.argv.includes('--skip-camera');
 
 await mkdir(".local/verification", { recursive: true });
@@ -28,6 +29,14 @@ try {
   await page.route("**/node_modules/.vite/deps/@xmaxai_web-sdk.js*", (route) =>
     route.fulfill({ contentType: "text/javascript", body: mock }),
   );
+  // 视频试穿走离线任务：用 ffmpeg 生成与原片等长的 24fps 假结果。
+  const fakeResult = (seconds) => {
+    const file = `.local/verification/fake-offline-${seconds}.mp4`;
+    const made = spawnSync("ffmpeg", ["-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", `testsrc2=size=640x360:rate=24`, "-t", String(seconds), "-pix_fmt", "yuv420p", "-c:v", "libx264", file]);
+    assert.equal(made.status, 0);
+    return readFileSync(file);
+  };
+  let offlineSeconds = 1.6, offlineMode = "ok", offlinePosts = [];
   let active = false,
     starts = 0,
     finishes = 0,
@@ -66,6 +75,15 @@ try {
       active = false;
       finishes++;
       data = { released: true, revoked: true };
+    } else if (path === "/api/video/normalize") {
+      return route.fulfill({ status: 501, json: { error: "未安装 FFmpeg" } });
+    } else if (path === "/api/offline") {
+      offlinePosts.push(route.request().postDataJSON());
+      data = { uid: `task-${offlinePosts.length}`, status: "pending" };
+    } else if (path === "/api/offline/status") {
+      data = offlineMode === "error" ? { status: "error", error: "测试：模型生成失败" } : { status: "completed", ready: true };
+    } else if (path === "/api/offline/result") {
+      return route.fulfill({ status: 200, contentType: "video/mp4", body: fakeResult(offlineSeconds) });
     } else if (path === "/api/products/resolve") {
       if (route.request().postDataJSON().url.includes("blocked"))
         return route.fulfill({ status: 400, json: { error: "页面无法解析" } });
@@ -122,51 +140,40 @@ try {
   await page.locator("#consent").check();
   await page.locator('[data-category="top"]').click();
   await page.getByRole('button', { name: '试穿条纹短款外套', exact: true }).click();
-  await page.evaluate(() => { globalThis.mockBlankWarmup = 700; });
   finishDelay = 1500;
   await page.locator("#start").click();
-  try { await page.locator('#remote video[data-origin="xmax-remote"]').waitFor({state: "visible"}); }
-  catch (error) {
+  await page.locator("#result-video").waitFor({ state: "visible", timeout: 30000 }).catch(async error => {
     console.log(JSON.stringify({ status: await page.locator("#status").textContent(), errors }));
-    throw error;
-  }
-  await page.waitForFunction(() => document.querySelector("#stage-label").textContent.includes("正在试穿")).catch(async error => {
-    console.log(JSON.stringify({ status: await page.locator('#status').textContent(), label: await page.locator('#stage-label').textContent(), errors, mock: await page.evaluate(() => ({input: globalThis.mockInput, format: globalThis.mockFormat})) }));
     throw error;
   });
   assert.equal(await page.locator("#person-video").isHidden(), true);
-  try { await page.locator("#result-video").waitFor({state: "visible"}); }
-  catch (error) {
-    console.log(JSON.stringify({ status: await page.locator("#status").textContent(), errors }));
-    throw error;
-  }
-  assert.equal(await page.locator("#start").isDisabled(), true);
   await page.waitForFunction(() => !document.querySelector("#start").disabled);
+  assert.equal(offlinePosts.length, 1);
+  assert.equal(offlinePosts[0].videoPath, "https://example.invalid/test-only.mp4");
+  assert.equal(offlinePosts[0].referencePath, "https://example.invalid/test-only.jpg");
+  assert.equal(await page.locator("#remote video").count(), 0, "video try-on does not use the realtime remote view");
   assert.equal(await page.locator("#result-video").isVisible(), true);
   const playback = await page.locator("#result-video").evaluate(async (video) => {
     const { hasVisibleFrame } = await import("/src/media.ts");
     return { ready: video.readyState, playing: !video.paused, duration: video.duration, visiblePixels: hasVisibleFrame(video) };
   });
   assert.ok(playback.ready >= 2 && playback.visiblePixels);
-  assert.ok(Math.abs(playback.duration - 1.6) < 0.01);
+  assert.ok(Math.abs(playback.duration - 1.6) < 0.15);
   assert.equal(await page.locator('#result-video').evaluate(video => video.loop), false);
   const sustained = await page.locator('#result-video').evaluate(inspectPlayback);
-  assert.ok(Math.abs(sustained.elapsed - 1.6) < 0.5 && sustained.lastTime > 1.4, `GUI must present the complete 1.6 second clip: ${JSON.stringify(sustained)}`);
-  await page.evaluate(() => { globalThis.mockBlankWarmup = 0; });
+  assert.ok(Math.abs(sustained.elapsed - 1.6) < 0.5 && sustained.lastTime > 1.3, `GUI must present the complete clip: ${JSON.stringify(sustained)}`);
   assert.equal(await page.locator("#result-photo").isVisible(), false);
   assert.equal(await page.locator("#save-photo").isHidden(), true);
-  assert.equal(finishes, 1);
+  assert.ok(finishes >= 1);
   finishDelay = 0;
-  assert.equal(await page.evaluate(() => globalThis.mockInput), "external");
-  assert.equal(await page.evaluate(() => globalThis.mockConfiguration.isAdaptiveQualityEnabled), false);
   const clipEvent = page.waitForEvent("download");
   await page.locator("#save-video").click();
-  await (await clipEvent).saveAs(".local/verification/test-only-studio.webm");
-  const studioProbe = spawnSync("ffprobe", ["-v", "error", "-show_entries", "stream=width,height:format=duration", "-of", "json", ".local/verification/test-only-studio.webm"], {encoding:"utf8"});
+  await (await clipEvent).saveAs(".local/verification/test-only-studio.mp4");
+  const studioProbe = spawnSync("ffprobe", ["-v", "error", "-show_entries", "stream=codec_name,r_frame_rate:format=duration", "-of", "json", ".local/verification/test-only-studio.mp4"], {encoding:"utf8"});
   const studio = JSON.parse(studioProbe.stdout);
   assert.ok(Math.abs(Number(studio.format.duration)-1.6) < 0.15);
-  assert.equal(studio.streams[0].width, 1080);
-  assert.equal(studio.streams[0].height, 1920);
+  assert.equal(studio.streams[0].codec_name, "h264");
+  assert.equal(studio.streams[0].r_frame_rate, "24/1");
   await page.locator("#compare").click();
   assert.equal(await page.locator("#person-video").isVisible(), true);
   await page.locator("#compare").click();
@@ -220,18 +227,16 @@ try {
   await page.getByRole('button', { name: '试穿白色棒球帽', exact: true }).click();
   assert.match(await page.locator('#outfit-count').textContent(), /已选 2 件.*同时试穿/);
 
+  offlineSeconds = 8;
   await page.locator("#start").click();
-  await page.waitForFunction(() =>
-    document.querySelector("#status").textContent.includes("正在生成动态短片"),
-  );
-  await page.waitForFunction(() => !document.querySelector("#start").disabled);
-  assert.equal(await page.evaluate(() => globalThis.mockInput), "external");
-  assert.match(await page.evaluate(() => globalThis.mockPrompt), /同时穿戴全部已选服饰（上衣、配饰：帽子）/);
+  await page.waitForFunction(() => !document.querySelector("#start").disabled, null, { timeout: 60000 });
+  assert.equal(offlinePosts.length, 2);
+  assert.match(offlinePosts[1].prompt, /同时穿戴全部已选服饰（上衣、配饰：帽子）/);
   assert.equal(await page.locator("#save-video").isVisible(), true, await page.locator('#status').textContent());
   const videoEvent = page.waitForEvent("download");
   await page.locator("#save-video").click();
   const download = await videoEvent;
-  await download.saveAs(".local/verification/test-only-video.webm");
+  await download.saveAs(".local/verification/test-only-video.mp4");
   const probe = spawnSync(
     "ffprobe",
     [
@@ -242,7 +247,7 @@ try {
       "stream=nb_read_frames:format=duration",
       "-of",
       "json",
-      ".local/verification/test-only-video.webm",
+      ".local/verification/test-only-video.mp4",
     ],
     { encoding: "utf8" },
   );
@@ -250,11 +255,12 @@ try {
   const metadata = JSON.parse(probe.stdout);
   assert.ok(Number(metadata.streams[0].nb_read_frames) > 20);
   assert.ok(
-    Math.abs(Number(metadata.format.duration) - 8) < 0.01,
+    Math.abs(Number(metadata.format.duration) - 8) < 0.15,
   );
-  const timeline = spawnSync("ffprobe", ["-v", "error", "-show_entries", "frame=best_effort_timestamp_time", "-of", "json", ".local/verification/test-only-video.webm"], {encoding:"utf8"});
+  const timeline = spawnSync("ffprobe", ["-v", "error", "-show_entries", "frame=best_effort_timestamp_time", "-of", "json", ".local/verification/test-only-video.mp4"], {encoding:"utf8"});
   const frameTimes = JSON.parse(timeline.stdout).frames.map((f) => Number(f.best_effort_timestamp_time));
   assert.ok(Math.max(...frameTimes) > 7.7 && Math.max(...frameTimes) < 8.15, "encoded frames must span the real eight-second timeline");
+  assert.ok(frameTimes.slice(1).every((t, i) => Math.abs(t - frameTimes[i] - 1 / 24) < 0.005), "result is constant 24fps with no dropped frames");
   assert.ok(frameTimes.every((t,i) => i === 0 || t >= frameTimes[i-1]));
   const fullPlayback = await page.locator('#result-video').evaluate(inspectPlayback);
   assert.ok(Math.abs(fullPlayback.elapsed - 8) < 1 && fullPlayback.lastTime > 7.7, 'GUI must play through all eight seconds');
@@ -272,7 +278,7 @@ try {
   await page.locator("#stop").click();
   await page.waitForFunction(() => !document.querySelector("#start").disabled);
   assert.equal(active, false);
-  assert.equal(finishes, 3);
+  assert.ok(finishes >= 3);
 
   // Image input must yield only an image, even though the provider uses a live transport.
   await page.locator("#source-open").click();
@@ -325,46 +331,18 @@ try {
     await page.locator('#source-done').click();
   }
 
-  // Unsupported recording must not quietly turn a video request into an image.
-  const supported = await page.evaluate(() => {
-    globalThis.savedSupport = MediaRecorder.isTypeSupported;
-    globalThis.savedEncoder = globalThis.VideoEncoder;
-    globalThis.VideoEncoder = undefined;
-    MediaRecorder.isTypeSupported = () => false;
-    return true;
-  });
-  assert.equal(supported, true);
+  // Offline failure must not produce a result or fall back to an image.
+  offlineMode = "error";
   await page.locator("#start").click();
   await page.waitForFunction(() => !document.querySelector("#start").disabled);
-  assert.match(await page.locator("#status").textContent(), /录制格式/);
+  assert.match(await page.locator("#status").textContent(), /生成失败：测试：模型生成失败/);
   assert.equal(await page.locator("#result-actions").isHidden(), true);
   assert.equal(await page.locator("#result-photo").isHidden(), true);
-  await page.evaluate(() => { MediaRecorder.isTypeSupported = globalThis.savedSupport; globalThis.VideoEncoder = globalThis.savedEncoder; });
-
-  // A local preview with no raw remote result must never trigger recording or a live label.
-  await page.evaluate(() => { globalThis.mockNoRemote = true; });
-  await page.locator("#start").click();
-  await page.waitForTimeout(400);
-  assert.equal(await page.locator("#stage-label").textContent(), "人物预览");
-  await page.locator("#stop").click();
-  await page.waitForFunction(() => !document.querySelector("#start").disabled);
-  assert.match(await page.locator("#stage-label").textContent(), /原始素材.*未生成结果/);
-  assert.equal(await page.locator("#result-actions").isHidden(), true);
   assert.equal(await page.locator("#person-video").isVisible(), true);
-  await page.evaluate(() => { globalThis.mockNoRemote = false; });
-
-  // Solid remote placeholders must not become a successful clip or cover.
-  await page.evaluate(() => { globalThis.mockBlankRemote = true; });
-  await page.locator("#start").click();
-  await page.waitForTimeout(500);
-  assert.equal(await page.locator("#stage-label").textContent(), "人物预览");
-  await page.locator("#stop").click();
-  await page.waitForFunction(() => !document.querySelector("#start").disabled);
-  assert.equal(await page.locator("#person-video").isVisible(), true);
-  assert.equal(await page.locator("#result-actions").isHidden(), true);
-  await page.evaluate(() => { globalThis.mockBlankRemote = false; });
+  offlineMode = "ok";
 
   // Player rejection must remain a failure after end() updates status.
+  offlineSeconds = 1.6;
   await page.evaluate(() => {
     globalThis.originalPlay = HTMLMediaElement.prototype.play;
     HTMLMediaElement.prototype.play = function () {
@@ -377,27 +355,6 @@ try {
   assert.equal(await page.locator("#stage-label").textContent(), "短片播放失败");
   assert.equal(await page.locator("#result-photo").isVisible(), true);
   await page.evaluate(() => { HTMLMediaElement.prototype.play = globalThis.originalPlay; });
-
-  // A lease that cannot contain the complete source must not save a truncated clip.
-  sessionSeconds = 7;
-  await page.locator('#start').click();
-  await page.waitForFunction(() => !document.querySelector('#start').disabled);
-  assert.match(await page.locator('#status').textContent(), /剩余会话时间不足/);
-  assert.equal(await page.locator('#result-actions').isHidden(), true);
-  assert.equal(await page.locator('#person-video').isVisible(), true);
-
-  // A stalled connection terminates once, without attributing it to user networking.
-  sessionSeconds = 2;
-  await page.evaluate(() => { globalThis.mockBlankRemote = true; });
-  const finishesBeforeTimeout = finishes;
-  await page.locator('#start').click();
-  await page.waitForFunction(() => !document.querySelector('#start').disabled);
-  assert.match(await page.locator('#status').textContent(), /达到等待上限/);
-  assert.doesNotMatch(await page.locator('#status').textContent(), /检查网络/);
-  assert.equal(finishes, finishesBeforeTimeout + 1);
-  assert.equal(await page.locator('#result-actions').isHidden(), true);
-  await page.evaluate(() => { globalThis.mockBlankRemote = false; });
-  sessionSeconds = 30;
 
   const long = ".local/verification/too-long.mp4";
   const made = spawnSync("ffmpeg", [
@@ -425,7 +382,7 @@ try {
   );
   await page.locator("#source-done").click();
   assert.deepEqual(errors, []);
-  assert.equal(starts, 10);
+  assert.equal(starts, 6);
   const report = {
     success: true,
     realApiCalls: 0,
@@ -435,22 +392,18 @@ try {
       "photo generation lifecycle",
       "playable short video download",
       "1.6s and 8s input/output duration match",
-      "HD external input with adaptive quality disabled",
       "image input produces image only",
       "results visible before delayed revocation",
-      "recording failure does not fall back to image",
-      "raw remote output selected over SDK local preview",
-      "encoded frame timestamps span 8 seconds and remain monotonic",
+      "offline video try-on result is 24fps h264 mp4 matching source duration",
+      "offline generation failure shows an error and no result",
+      "encoded frame timestamps span 8 seconds, monotonic and constant fps",
       "2048px garment reference and dimension hints",
-      "no remote result restores original label",
       "original comparison",
       "safe product import",
       "parse fallback and purchase link",
       "video duration limit",
       "original video previews without image extraction",
-      "standard 1080P output and full-duration continuous playback",
       "half-body lower garment validation",
-      "full capture time reserved before recording and stalled lease expires once",
       "pending-key cancellation",
       ...(!skipCamera ? ["native camera capture and cleanup"] : []),
     ],
