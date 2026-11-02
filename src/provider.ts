@@ -8,10 +8,12 @@ import {
   XmaxConfiguration,
   XmaxEnvironment,
   XmaxRealtimeVideoView,
-  defaultCameraVideoFormat,
+  RealtimeVideoFormat,
+  type RealtimeTiming,
+  type DownlinkVideoStatistics,
   type XmaxRealtimeManaging,
 } from "@xmaxai/web-sdk";
-import { imageFile, normalizeRecording, type Source } from "./media";
+import { loadImage, waitMedia, normalizeRecording, type Source } from "./media";
 
 export type Ticket = {
   lease: string;
@@ -25,6 +27,11 @@ export type Result = {
   video?: Blob;
   width: number;
   height: number;
+  duration?: number;
+  complete?: boolean;
+  startupMs?: number;
+  timing?: RealtimeTiming;
+  transport?: DownlinkVideoStatistics;
 };
 export class TryOnSession {
   private manager?: XmaxRealtimeManaging;
@@ -47,6 +54,11 @@ export class TryOnSession {
   private result: Result = { width: 0, height: 0 };
   private startedFrames = false;
   private recordedAt = 0;
+  private inputVideo?: HTMLVideoElement;
+  private inputStream?: MediaStream;
+  private paintTimer?: ReturnType<typeof setInterval>;
+  private targetSeconds = 0;
+  cleanup: Promise<void> = Promise.resolve();
   constructor(
     private container: HTMLElement,
     private onStatus: (message: string) => void,
@@ -69,10 +81,14 @@ export class TryOnSession {
   async start(
     ticket: Ticket,
     source: Source,
-    mode: "photo" | "video",
     reference: File,
     prompt: string,
   ) {
+    const launched = performance.now();
+    const mode = source.isVideo ? "video" : "photo";
+    this.targetSeconds = source.isVideo ? source.duration : 0;
+    if (source.isVideo && ticket.outputSeconds + 0.001 < source.duration)
+      throw new Error("会话时长不足，已阻止生成被截短的视频");
     const client = new XmaxClient(
       new XmaxConfiguration({
         apiKey: ticket.temporaryApiKey,
@@ -82,7 +98,7 @@ export class TryOnSession {
     const realtime = client.createRealtimeManager(
       new RealtimeConfiguration({
         model: RealtimeModel.x2_1,
-        isAdaptiveQualityEnabled: true,
+        isAdaptiveQualityEnabled: false,
       }),
     );
     this.manager = realtime;
@@ -102,27 +118,22 @@ export class TryOnSession {
         this.onStatus("正在接收试穿画面…");
     });
     if (this.stopped) return;
-    this.onStatus("正在准备人物画面…");
-    const stream = source.isVideo
-      ? await realtime.createLocalVideoStream({
-          file: source.file,
-          loop: true,
-          includeAudio: false,
-          videoFormat: defaultCameraVideoFormat(RealtimeModel.x2_1),
-        })
-      : await realtime.createLocalImageStream({
-          file: await imageFile(source.poster, "person.jpg"),
-          videoFormat: defaultCameraVideoFormat(RealtimeModel.x2_1),
-        });
+    await realtime.setTimingListener((timing) => {
+      this.result.timing = timing;
+    });
+    await realtime.setDownlinkVideoStatisticsListener((stats) => {
+      if (stats) this.result.transport = stats;
+    });
+    this.onStatus("正在准备高清人物画面与服饰参考图…");
+    // Prepare the source and upload the reference concurrently; neither depends on the other.
+    const [stream, stored] = await Promise.all([
+      this.prepareHDInput(realtime, source),
+      client.createStorageService().uploadImage({
+        data: reference, fileName: reference.name, contentType: reference.type,
+      }),
+    ]);
     if (this.stopped) return;
     this.localView.track = stream.videoTrack;
-    this.onStatus("正在上传服饰参考图…");
-    const stored = await client.createStorageService().uploadImage({
-      data: reference,
-      fileName: reference.name,
-      contentType: reference.type,
-    });
-    if (this.stopped) return;
     this.onStatus("XMAX X2.1 正在为你试穿…");
     const remote = await realtime.startGeneration({
       localStream: stream,
@@ -131,54 +142,105 @@ export class TryOnSession {
     });
     if (this.stopped) return;
     this.view.track = remote.videoTrack;
-    // Start output timing only when a decoded remote frame is actually displayed.
+    // Hold the original first frame through connection warmup. Never loop the source.
     this.frameTimer = setInterval(() => {
       const video = this.view.videoElement;
       if (this.stopped || video.readyState < 2 || !video.videoWidth) return;
+      this.result.width = video.videoWidth;
+      this.result.height = video.videoHeight;
       if (!this.startedFrames) {
         this.startedFrames = true;
+        this.result.startupMs = performance.now() - launched;
+        if (mode === "video") {
+          try { this.record(video); }
+          catch (error) {
+            this.onEnd(this.result, error instanceof Error ? error.message : "视频录制失败");
+            return;
+          }
+          void this.inputVideo?.play().catch(() =>
+            this.onEnd(this.result, "人物视频播放失败，请使用 H.264 MP4 后重试"));
+        }
         this.onReady();
-        if (mode === "video") this.record(video);
-        this.timer = setTimeout(
-          () => this.onEnd(this.result),
-          (mode === "photo"
-            ? Math.min(3, ticket.outputSeconds)
-            : ticket.outputSeconds) * 1000,
-        );
+        this.timer = setTimeout(() => {
+          this.result.complete = true;
+          this.onEnd(this.result);
+        }, (mode === "video" ? source.duration : 1) * 1000);
       }
-      const canvas = document.createElement("canvas");
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      canvas.getContext("2d")!.drawImage(video, 0, 0);
-      this.result = {
-        ...this.result,
-        photo: canvas.toDataURL("image/jpeg", 0.95),
-        width: canvas.width,
-        height: canvas.height,
-      };
-    }, 300);
+      // For video, capture only a cover; do not repeatedly encode full-HD JPEGs.
+      if (mode === "photo" || !this.result.photo) {
+        const canvas = document.createElement("canvas");
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        canvas.getContext("2d")!.drawImage(video, 0, 0);
+        this.result.photo = canvas.toDataURL("image/jpeg", 0.95);
+      }
+    }, 50);
+  }
+  private async prepareHDInput(realtime: XmaxRealtimeManaging, source: Source) {
+    let media: HTMLVideoElement | HTMLImageElement;
+    if (source.isVideo) {
+      const video = document.createElement("video");
+      this.inputVideo = video;
+      video.muted = true;
+      video.playsInline = true;
+      video.loop = false;
+      const ready = waitMedia(video, "loadeddata");
+      video.src = source.url;
+      await ready;
+      media = video;
+    } else media = await loadImage(source.url);
+    if (this.stopped) throw new Error("会话已停止");
+    const width = media instanceof HTMLVideoElement ? media.videoWidth : media.naturalWidth;
+    const height = media instanceof HTMLVideoElement ? media.videoHeight : media.naturalHeight;
+    const ratio = width / height;
+    const sizes = [[1920,1080], [1080,1920], [1408,1408], [1152,1536], [1536,1152]];
+    const [w,h] = sizes.sort((a,b) =>
+      Math.abs(Math.log(ratio / (a[0]/a[1]))) - Math.abs(Math.log(ratio / (b[0]/b[1]))))[0];
+    const canvas = document.createElement("canvas");
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext("2d")!;
+    const scale = Math.min(w/width, h/height);
+    const draw = () => {
+      ctx.fillStyle = "#fff"; ctx.fillRect(0,0,w,h);
+      ctx.drawImage(media, (w-width*scale)/2, (h-height*scale)/2, width*scale, height*scale);
+    };
+    draw();
+    this.paintTimer = setInterval(draw, 1000/30);
+    this.inputStream = canvas.captureStream(30);
+    return realtime.createExternalVideoStream({
+      videoTrack: this.inputStream.getVideoTracks()[0],
+      videoFormat: new RealtimeVideoFormat({
+        width: w, height: h, fps: 30, minimumBitrate: 2000, maximumBitrate: 8000,
+        encoderPreference: "maintainQuality" as RealtimeVideoFormat["encoderPreference"],
+      }),
+    });
   }
   private record(video: HTMLVideoElement) {
-    if (!("MediaRecorder" in window)) return;
+    if (!("MediaRecorder" in window)) throw new Error("浏览器不支持视频保存，请使用新版 Chrome、Edge 或 Safari");
     const stream = video.srcObject;
-    if (!(stream instanceof MediaStream)) return;
+    if (!(stream instanceof MediaStream)) throw new Error("未收到可录制的视频流");
     const mime = ["video/webm;codecs=vp8", "video/webm", "video/mp4"].find(
       (type) => MediaRecorder.isTypeSupported(type),
     );
-    if (!mime || !stream.getVideoTracks()[0]) return;
+    if (!mime || !stream.getVideoTracks()[0]) throw new Error("浏览器不支持当前视频录制格式");
     try {
       this.recordTrack = stream.getVideoTracks()[0].clone();
       this.recorder = new MediaRecorder(new MediaStream([this.recordTrack]), {
         mimeType: mime,
+        videoBitsPerSecond: 8_000_000,
       });
       this.recorder.ondataavailable = (event) => {
         if (event.data.size) this.chunks.push(event.data);
       };
+      this.recorder.onerror = () => {
+        this.result.complete = false;
+        this.onEnd(this.result, "视频录制中断，未生成完整短片");
+      };
       this.recorder.start(300);
-      this.recordedAt = Date.now();
+      this.recordedAt = performance.now();
     } catch {
       this.recordTrack?.stop();
-      this.onStatus("当前浏览器无法保存视频，仍可保存试穿照片");
+      throw new Error("视频保存失败，请换用新版浏览器后重试");
     }
   }
   stop(): Promise<Result> {
@@ -186,10 +248,14 @@ export class TryOnSession {
     this.stopped = true;
     clearTimeout(this.timer);
     clearInterval(this.frameTimer);
+    clearInterval(this.paintTimer);
+    this.inputVideo?.pause();
     this.closing = (async () => {
       if (this.recorder && this.recorder.state !== "inactive") {
         const recorder = this.recorder;
-        const elapsed = Date.now() - this.recordedAt;
+        const elapsed = performance.now() - this.recordedAt;
+        this.result.duration = elapsed / 1000;
+        if (elapsed < this.targetSeconds * 1000 - 100) this.result.complete = false;
         await new Promise<void>((resolve) => {
           const timer = setTimeout(resolve, 2500);
           recorder.addEventListener(
@@ -209,10 +275,10 @@ export class TryOnSession {
           );
       }
       this.recordTrack?.stop();
-      try {
-        await this.manager?.close();
-      } catch {
-        /* Backend revocation also runs. */
+      this.cleanup = this.manager?.close().catch(() => {}) ?? Promise.resolve();
+      this.inputStream?.getTracks().forEach((track) => track.stop());
+      if (this.inputVideo) {
+        this.inputVideo.removeAttribute("src"); this.inputVideo.load();
       }
       this.container.replaceChildren();
       this.localContainer.remove();

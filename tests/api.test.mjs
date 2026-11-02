@@ -117,3 +117,14 @@ test("daily allowances reset at midnight in Asia/Shanghai", async (t) => {
   clock = new Date("2026-10-30T16:01:00Z");
   assert.equal(api.status("visitor").remaining, 1);
 });
+
+
+test("validate source duration before reserving budget; retain a full ten-second clip", async (t) => {
+  const { api, calls } = setup(t);
+  for (const duration of [0, -1, 11, "8", null, NaN])
+    await assert.rejects(api.start("visitor", randomUUID(), duration), /时长/);
+  assert.equal(calls.length, 0);
+  const ticket = await api.start("visitor", randomUUID(), 10);
+  assert.equal(ticket.outputSeconds, 10);
+  await api.finish("visitor", ticket.lease);
+});

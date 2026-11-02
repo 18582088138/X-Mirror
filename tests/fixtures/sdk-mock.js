@@ -9,6 +9,7 @@ export const RealtimeModel = { x2_1: "x2_1" };
 export const RealtimeConnectionState = { generating: "generating" };
 export const VideoContentMode = { fit: "fit" };
 export const defaultCameraVideoFormat = () => ({});
+export class RealtimeVideoFormat { constructor(options) { Object.assign(this, options); } }
 export class RealtimeConfiguration {
   constructor(options) {
     Object.assign(this, options);
@@ -42,7 +43,8 @@ export class XmaxClient {
       }),
     };
   }
-  createRealtimeManager() {
+  createRealtimeManager(configuration) {
+    globalThis.mockConfiguration = configuration;
     let callback, stream, ticker, local;
     const localStream = () => {
       const canvas = document.createElement("canvas");
@@ -56,6 +58,14 @@ export class XmaxClient {
       setStateListener: async (listener) => {
         callback = listener;
       },
+      setTimingListener: async () => {},
+      setDownlinkVideoStatisticsListener: async () => {},
+      createExternalVideoStream: async (options) => {
+        globalThis.mockFormat = options.videoFormat;
+        globalThis.mockInput = "external";
+        local = new MediaStream([options.videoTrack]);
+        return { videoTrack: options.videoTrack };
+      },
       createLocalImageStream: async () => {
         globalThis.mockInput = "photo";
         return localStream();
@@ -67,8 +77,8 @@ export class XmaxClient {
       startGeneration: async (options) => {
         globalThis.mockPrompt = options.context.prompt;
         const canvas = document.createElement("canvas");
-        canvas.width = 360;
-        canvas.height = 640;
+        canvas.width = globalThis.mockFormat.width;
+        canvas.height = globalThis.mockFormat.height;
         const context = canvas.getContext("2d");
         let frame = 0;
         const paint = () => {

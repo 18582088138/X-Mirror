@@ -10,7 +10,7 @@ const cases = (
 ).split(",");
 if (
   cases.some(
-    (name) => !["top", "bottom", "hat", "combo", "video"].includes(name),
+    (name) => !["top", "bottom", "hat", "combo", "video", "image"].includes(name),
   )
 )
   throw new Error("未知验证类别");
@@ -32,6 +32,12 @@ try {
     acceptDownloads: true,
   });
   const connections = [];
+  const metrics = [];
+  await page.exposeFunction("recordMetrics", (detail) => metrics.push(detail));
+  await page.addInitScript(() => {
+    window.addEventListener("xmirror:metrics", (e) => window.recordMetrics(e.detail));
+    window.addEventListener("xmirror:first-frame", (e) => window.recordMetrics(e.detail));
+  });
   await page.exposeFunction("recordConnection", (event) =>
     connections.push(event),
   );
@@ -72,10 +78,13 @@ try {
       );
       await page.locator("#source-done").click();
     }
-    await page
-      .locator(name === "video" ? "#mode-video" : "#mode-photo")
-      .click();
-    if (["top", "combo", "video"].includes(name)) {
+    if (name === "image") {
+      await page.locator("#source-open").click();
+      await page.locator("#model-file").setInputFiles("ref_material/materials/references/person.png");
+      await page.waitForFunction(() => document.querySelector("#source-description").textContent.includes("照片"));
+      await page.locator("#source-done").click();
+    }
+    if (["top", "combo", "video", "image"].includes(name)) {
       await page.locator('[data-category="top"]').click();
       await page
         .getByRole("button", { name: "试穿条纹短款外套", exact: true })
@@ -128,25 +137,18 @@ try {
       success,
       states,
       connections: [...connections],
+      metrics: [...metrics],
       outputFile: undefined,
       bytes: 0,
     };
     if (success) {
       const event = page.waitForEvent("download");
-      await page.locator("#save-photo").click();
+      await page.locator(name === "image" ? "#save-photo" : "#save-video").click();
       const file = await event;
-      const path = `.local/verification/live/${name}.jpg`;
+      const path = `.local/verification/live/${name}.${file.suggestedFilename().split(".").at(-1)}`;
       await file.saveAs(path);
       record.outputFile = path;
       record.bytes = (await stat(path)).size;
-      if (await page.locator("#save-video").isVisible()) {
-        const event = page.waitForEvent("download");
-        await page.locator("#save-video").click();
-        const file = await event;
-        await file.saveAs(
-          `.local/verification/live/${name}.${file.suggestedFilename().split(".").at(-1)}`,
-        );
-      }
       await page.screenshot({
         path: `.local/verification/live/${name}-page.png`,
         fullPage: true,

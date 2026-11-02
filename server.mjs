@@ -177,7 +177,7 @@ const server = http.createServer(async (req, res) => {
         throw new ApiError("请求格式无效");
       }
       if (path === "/api/start")
-        return reply(200, await api.start(owner, data.requestId));
+        return reply(200, await api.start(owner, data.requestId, data.sourceSeconds));
       if (path === "/api/finish")
         return reply(200, await api.finish(owner, data.lease));
       if (path === "/api/products/resolve")
@@ -231,7 +231,7 @@ const cleanup = setInterval(() => {
 cleanup.unref();
 server.listen(port, "0.0.0.0", () =>
   console.log(
-    `X-Mirror: http://localhost:${port} · 单次生成最多 ${api.config.outputSeconds}s · 启动不调用模型`,
+    `X-Mirror: http://localhost:${port} · 视频按输入时长生成（最长 10s） · 启动不调用模型`,
   ),
 );
 for (const signal of ["SIGINT", "SIGTERM"])

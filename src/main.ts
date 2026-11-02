@@ -24,6 +24,9 @@ type Config = {
 };
 const $ = <T extends HTMLElement = HTMLElement>(id: string) =>
   document.getElementById(id) as T;
+const providerModule = import("./provider"); // Prefetch SDK only; no paid request.
+let clickedAt = 0;
+let clickToFirstFrameMs: number | undefined;
 let config: Config | undefined;
 let source: Source | undefined;
 let catalog: Garment[] = [];
@@ -81,7 +84,7 @@ $("app").innerHTML = `
    <fieldset id="input-controls">
     <div class="section-label"><span><b>01</b> 把你带进试衣间</span><span class="muted">全身 / 半身均可</span></div>
     <div class="source-card"><button id="source-open" class="source-choice"><img id="source-thumb" alt="当前人物素材" hidden><span class="source-placeholder" id="source-placeholder">${icon("person")}</span><span><strong id="source-name">添加人物素材</strong><small id="source-description">上传短视频，或用摄像头录制</small></span><span class="source-change">更换 ${icon("arrow")}</span></button><button class="camera-shortcut" id="camera-open" aria-label="摄像头录制" title="摄像头录制">${icon("camera")}</button></div>
-    <div class="mode-row"><div class="segmented" aria-label="生成模式"><button id="mode-photo" class="selected" aria-pressed="true">试穿照片</button><button id="mode-video" aria-pressed="false">动态短片</button></div><span id="mode-note">保存一张试穿照片</span></div>
+    <div class="mode-row"><div class="segmented" aria-label="根据人物素材自动选择输出类型"><button id="mode-photo" class="selected" aria-pressed="true">试穿照片</button><button id="mode-video" aria-pressed="false">动态短片</button></div><span id="mode-note">保存一张试穿照片</span></div>
     <div class="section-label" id="outfit"><span><b>02</b> 搭配你的下一套</span><span class="muted" id="outfit-count">选择心动的单品</span></div>
     <div id="slots" class="outfit-slots" aria-label="搭配槽位"></div>
     <div class="category-tabs" role="tablist" aria-label="服饰类别"><button data-category="top" role="tab" aria-selected="true" class="selected">上衣</button><button data-category="bottom" role="tab" aria-selected="false">下装</button><button data-category="accessory" role="tab" aria-selected="false">配饰</button><span id="catalog-note">我的衣橱</span></div>
@@ -110,7 +113,7 @@ $("app").innerHTML = `
  <div id="demo-models" class="demo-models" hidden><span class="eyebrow">或先用本地参考素材体验</span><div><button data-model="studio">${icon("play")}全身视频</button><button data-model="woman">${icon("play")}半身视频</button><button data-model="man">${icon("play")}男模视频</button></div></div>
  <p id="source-status" class="status" role="status"></p><button id="source-done" class="primary">使用这个人物 ${icon("check")}</button>
 </dialog>
-<dialog id="guide-dialog" class="guide-dialog"><div class="dialog-heading"><h2>让试穿效果更自然。</h2><button class="icon-button" data-close="guide-dialog" aria-label="关闭使用指南">${icon("close")}</button></div><ol><li><strong>拍一段真实的你。</strong><p>建议 5 秒，最长 10 秒。保持单人、明亮、无遮挡；试下装时让腿部完整入镜。</p></li><li><strong>选一张清晰画面。</strong><p>有视频时始终使用视频中的动作。可选择保存试穿照片，或生成最多 8 秒的动态短片。</p></li><li><strong>添加想试的单品。</strong><p>粘贴商品链接或上传清晰正面图片。页面需要登录、验证码或无法读取时，补传图片即可。</p></li><li><strong>试好了，再去购买。</strong><p>保存照片或短片，点击商品入口前往商家。上传图片时也可以在链接栏补充购买链接。</p></li></ol><p class="guide-privacy">视频素材的画面会实时传给 XMAX，音频不发送；照片素材以静态画面流处理。视频封面只用于缩略图。服饰参考图上传至 XMAX 存储，第三方保存规则见其隐私政策。本应用不保存人物和结果素材，刷新页面后需重新上传。</p><a href="https://22duck.cn/docs/resources/privacy/" target="_blank" rel="noopener noreferrer">查看 XMAX 隐私政策 ↗</a><p class="field-note">配饰与多件组合效果仍需逐款确认；试穿图片不能替代真实尺码判断。</p></dialog>`;
+<dialog id="guide-dialog" class="guide-dialog"><div class="dialog-heading"><h2>让试穿效果更自然。</h2><button class="icon-button" data-close="guide-dialog" aria-label="关闭使用指南">${icon("close")}</button></div><ol><li><strong>拍一段真实的你。</strong><p>建议 5 秒，最长 10 秒。保持单人、明亮、无遮挡；试下装时让腿部完整入镜。</p></li><li><strong>选一张清晰画面。</strong><p>视频输入生成同长度视频，照片输入生成照片。视频封面只用于缩略图。</p></li><li><strong>添加想试的单品。</strong><p>粘贴商品链接或上传清晰正面图片。页面需要登录、验证码或无法读取时，补传图片即可。</p></li><li><strong>试好了，再去购买。</strong><p>保存照片或短片，点击商品入口前往商家。上传图片时也可以在链接栏补充购买链接。</p></li></ol><p class="guide-privacy">视频素材的画面会实时传给 XMAX，音频不发送；照片素材以静态画面流处理。视频封面只用于缩略图。服饰参考图上传至 XMAX 存储，第三方保存规则见其隐私政策。本应用不保存人物和结果素材，刷新页面后需重新上传。</p><a href="https://22duck.cn/docs/resources/privacy/" target="_blank" rel="noopener noreferrer">查看 XMAX 隐私政策 ↗</a><p class="field-note">配饰与多件组合效果仍需逐款确认；试穿图片不能替代真实尺码判断。</p></dialog>`;
 
 function status(message: string, error = false) {
   $("status").textContent = message;
@@ -153,7 +156,8 @@ function controls() {
   $("stop").hidden = !busy || finishing;
   $<HTMLButtonElement>("compare").disabled = !result?.photo || locked;
   $<HTMLButtonElement>("source-done").disabled = !source || loadingSource;
-  $<HTMLButtonElement>("mode-video").disabled = !source?.isVideo || locked;
+  $<HTMLButtonElement>("mode-video").disabled = true;
+  $<HTMLButtonElement>("mode-photo").disabled = true;
   $("quota").textContent = config?.configured
     ? `今日可试 ${config.remaining} 次`
     : "";
@@ -230,7 +234,7 @@ function renderSource() {
   });
   $("frame-picker").hidden = source.frames.length < 2;
   $<HTMLSelectElement>("coverage").value = source.coverage;
-  setMode(source.isVideo ? "video" : "photo");
+  setMode();
   controls();
 }
 async function setSource(
@@ -259,9 +263,9 @@ async function setSource(
     controls();
   }
 }
-function setMode(next: "photo" | "video") {
+function setMode() {
   if (busy || finishing) return;
-  mode = next;
+  mode = source?.isVideo ? "video" : "photo";
   clearResult();
   for (const value of ["photo", "video"]) {
     const button = $(`mode-${value}`);
@@ -270,8 +274,8 @@ function setMode(next: "photo" | "video") {
   }
   $("mode-note").textContent =
     mode === "photo"
-      ? "保存一张试穿照片"
-      : `动态预览 · 最多 ${config?.outputSeconds || 8} 秒`;
+      ? "自动输出试穿照片"
+      : `自动输出视频 · ${source?.duration.toFixed(2)} 秒`;
 }
 function renderSlots() {
   $("slots").replaceChildren();
@@ -517,8 +521,6 @@ $("accessory-select").onchange = () => {
   }
 };
 $("consent").onchange = controls;
-$("mode-photo").onclick = () => setMode("photo");
-$("mode-video").onclick = () => setMode("video");
 function openSource() {
   if (busy || finishing) return;
   $<HTMLDialogElement>("source-dialog").showModal();
@@ -730,13 +732,14 @@ function showResult() {
   }
   $("stage-label").innerHTML = comparing
     ? `${icon("person")}原始画面`
-    : `${icon("check")}试穿完成`;
+    : `${icon("check")}${result.video && !result.complete ? "未完成的短片" : "试穿完成"}`;
   $("stage-caption").textContent = comparing
     ? "真实的你。"
     : lastOutfit.map((item) => item.name).join(" + ");
   $("compare").classList.toggle("comparing", comparing);
   $("result-actions").hidden = false;
   $("save-video").hidden = !result?.video;
+  $("save-photo").hidden = !!source?.isVideo;
   renderShopping();
   controls();
 }
@@ -757,18 +760,12 @@ async function end(error?: string) {
       } catch {}
     const current = session;
     session = undefined;
-    const outcomes = await Promise.allSettled([
-      current?.stop(),
-      ticket
-        ? api<{ revoked?: boolean }>("/api/finish", { lease: ticket.lease })
-        : Promise.resolve(undefined),
-    ]);
-    if (outcomes[0].status === "fulfilled" && outcomes[0].value?.photo)
-      result = outcomes[0].value;
-    cleanupFailed =
-      outcomes[1].status === "rejected" ||
-      (outcomes[1].status === "fulfilled" &&
-        outcomes[1].value?.revoked === false);
+    const revoke = ticket
+      ? api<{ revoked?: boolean }>("/api/finish", { lease: ticket.lease })
+          .then((value) => value.revoked !== false, () => false)
+      : Promise.resolve(true);
+    const saved = await current?.stop();
+    if (saved?.photo && (!source?.isVideo || saved.video)) result = saved;
     if (result?.video) resultURL = objectURL(result.video);
     ticket = undefined;
     pendingTicket = undefined;
@@ -781,16 +778,22 @@ async function end(error?: string) {
       $("remote").hidden = true;
       showOriginal(!!source);
     }
-    const partial = !!result?.photo && !!error?.includes("等待超时");
-    status(
-      partial
-        ? "已保存当前试穿画面，本次连接已达到等待上限。"
-        : error ||
-            (result?.photo
-              ? "试穿已完成。保存喜欢的造型，再去看看实物。"
-              : "本次生成已停止，尚未收到可保存的画面。"),
-      !!error && !partial,
-    );
+    const partial = !!result?.video && !result.complete;
+    const dimensions = result ? `${result.width} × ${result.height}` : "";
+    const startup = clickToFirstFrameMs ? ` · 首帧 ${(clickToFirstFrameMs/1000).toFixed(1)} 秒` : "";
+    const transport = result?.transport?.endToEndDelayMs;
+    const latency = transport === undefined ? "" : ` · RTC 媒体延迟约 ${Math.round(transport)}ms`;
+    status(error || (result
+      ? `${partial ? "已保存未完成的视频片段" : "试穿已完成"} · ${dimensions}${result.video ? ` · ${result.duration?.toFixed(2)} 秒` : ""}${startup}${latency}。`
+      : "本次生成已停止，尚未收到可保存的结果。"), !!error || partial);
+    window.dispatchEvent(new CustomEvent("xmirror:metrics", {detail: {
+      width: result?.width, height: result?.height, duration: result?.duration,
+      sourceDuration: source?.duration, complete: result?.complete,
+      clickToFirstFrameMs, startupMs: result?.startupMs, timing: result?.timing, transport: result?.transport,
+    }}));
+    // Present the saved media before network cleanup completes; keep new sessions locked.
+    await current?.cleanup;
+    cleanupFailed = !(await revoke);
     if (cleanupFailed)
       status(
         "结果已保留；会话撤销未确认，临时密钥将在额度或到期限制下停止。",
@@ -818,6 +821,8 @@ $("start").onclick = async () => {
   clearResult();
   busy = true;
   controls();
+  clickedAt = performance.now();
+  clickToFirstFrameMs = undefined;
   const run = ++epoch;
   const valid = () => busy && !finishing && epoch === run;
   lastOutfit = outfit.map((item) => ({ ...item }));
@@ -825,12 +830,12 @@ $("start").onclick = async () => {
   $("loading-text").textContent = "正在准备你的新造型";
   status("正在整理搭配素材…");
   try {
-    const reference = await buildReference(outfit, source.poster);
-    const { TryOnSession } = await import("./provider");
+    const [reference, { TryOnSession }] = await Promise.all([buildReference(outfit, source.poster), providerModule]);
     if (!valid()) return;
     status("正在创建限额试穿会话…");
     pendingTicket = api<Ticket>("/api/start", {
       requestId: crypto.randomUUID(),
+      sourceSeconds: source.isVideo ? source.duration : 1,
     });
     const next = await pendingTicket;
     if (!valid()) return;
@@ -849,6 +854,8 @@ $("start").onclick = async () => {
       },
       () => {
         if (!valid()) return;
+        clickToFirstFrameMs = performance.now() - clickedAt;
+        window.dispatchEvent(new CustomEvent("xmirror:first-frame", { detail: { clickToFirstFrameMs } }));
         $("loading").hidden = true;
         showOriginal(false);
         $("remote").hidden = false;
@@ -857,7 +864,7 @@ $("start").onclick = async () => {
           .map((item) => item.name)
           .join(" + ");
         status(
-          `正在生成${mode === "photo" ? "试穿照片" : "动态短片"}，最多 ${mode === "photo" ? Math.min(3, next.outputSeconds) : next.outputSeconds} 秒后自动保存。`,
+          `正在生成${mode === "photo" ? "试穿照片" : "动态短片"}，最多 ${mode === "photo" ? 1 : source!.duration.toFixed(2)} 秒后自动保存。`,
         );
       },
       (_result, error) => {
@@ -868,7 +875,6 @@ $("start").onclick = async () => {
     await session.start(
       next,
       source,
-      mode,
       reference.file,
       buildPrompt(outfit, reference.layout),
     );

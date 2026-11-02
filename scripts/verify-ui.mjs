@@ -29,7 +29,8 @@ try {
   let active = false,
     starts = 0,
     finishes = 0,
-    delay = 0;
+    delay = 0,
+    finishDelay = 0;
   const img = `data:image/jpeg;base64,${(await readFile("public/demo/sweatshirt.jpg")).toString("base64")}`;
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
@@ -54,10 +55,11 @@ try {
         lease: `test-${starts}`,
         temporaryApiKey: "tk-test-only",
         environment: "china",
-        outputSeconds: 3,
+        outputSeconds: route.request().postDataJSON().sourceSeconds,
         sessionSeconds: 15,
       };
     } else if (path === "/api/finish") {
+      if (finishDelay) await new Promise((resolve) => setTimeout(resolve, finishDelay));
       active = false;
       finishes++;
       data = { released: true, revoked: true };
@@ -112,23 +114,28 @@ try {
     fullPage: true,
   });
   await page.setViewportSize({ width: 1280, height: 900 });
-  await page.locator("#mode-photo").click();
+  assert.equal(await page.locator("#mode-photo").isDisabled(), true);
   await page.locator("#consent").check();
+  finishDelay = 1500;
   await page.locator("#start").click();
-  await page.waitForFunction(() =>
-    document.querySelector("#status").textContent.includes("正在生成试穿照片"),
-  );
+  await page.locator("#result-video").waitFor({state: "visible"});
+  assert.equal(await page.locator("#start").isDisabled(), true);
   await page.waitForFunction(() => !document.querySelector("#start").disabled);
-  assert.equal(await page.locator("#result-photo").isVisible(), true);
+  assert.equal(await page.locator("#result-video").isVisible(), true);
+  assert.equal(await page.locator("#result-photo").isVisible(), false);
+  assert.equal(await page.locator("#save-photo").isHidden(), true);
   assert.equal(finishes, 1);
-  assert.equal(await page.evaluate(() => globalThis.mockInput), "video");
-  const photoEvent = page.waitForEvent("download");
-  await page.locator("#save-photo").click();
-  const photo = await photoEvent;
-  await photo.saveAs(".local/verification/test-only-photo.jpg");
-  assert.ok(
-    (await stat(".local/verification/test-only-photo.jpg")).size > 1000,
-  );
+  finishDelay = 0;
+  assert.equal(await page.evaluate(() => globalThis.mockInput), "external");
+  assert.equal(await page.evaluate(() => globalThis.mockConfiguration.isAdaptiveQualityEnabled), false);
+  const clipEvent = page.waitForEvent("download");
+  await page.locator("#save-video").click();
+  await (await clipEvent).saveAs(".local/verification/test-only-studio.webm");
+  const studioProbe = spawnSync("ffprobe", ["-v", "error", "-show_entries", "stream=width,height:format=duration", "-of", "json", ".local/verification/test-only-studio.webm"], {encoding:"utf8"});
+  const studio = JSON.parse(studioProbe.stdout);
+  assert.ok(Math.abs(Number(studio.format.duration)-1.6) < 0.15);
+  assert.equal(studio.streams[0].width, 1408);
+  assert.equal(studio.streams[0].height, 1408);
   await page.locator("#compare").click();
   assert.equal(await page.locator("#person-video").isVisible(), true);
   await page.locator("#compare").click();
@@ -173,13 +180,13 @@ try {
   assert.match(await page.locator("#status").textContent(), /腿部完整/);
   assert.equal(starts, 1);
   await page.getByRole("button", { name: "移除下装", exact: true }).click();
-  await page.locator("#mode-video").click();
+
   await page.locator("#start").click();
   await page.waitForFunction(() =>
     document.querySelector("#status").textContent.includes("正在生成动态短片"),
   );
   await page.waitForFunction(() => !document.querySelector("#start").disabled);
-  assert.equal(await page.evaluate(() => globalThis.mockInput), "video");
+  assert.equal(await page.evaluate(() => globalThis.mockInput), "external");
   assert.equal(await page.locator("#save-video").isVisible(), true);
   const videoEvent = page.waitForEvent("download");
   await page.locator("#save-video").click();
@@ -203,8 +210,8 @@ try {
   const metadata = JSON.parse(probe.stdout);
   assert.ok(Number(metadata.streams[0].nb_read_frames) > 20);
   assert.ok(
-    Number(metadata.format.duration) > 2 &&
-      Number(metadata.format.duration) < 4,
+    Number(metadata.format.duration) > 7.85 &&
+      Number(metadata.format.duration) < 8.15,
   );
   assert.equal(await page.locator("#shopping").isVisible(), true);
   assert.equal(
@@ -221,6 +228,20 @@ try {
   await page.waitForFunction(() => !document.querySelector("#start").disabled);
   assert.equal(active, false);
   assert.equal(finishes, 3);
+
+  // Image input must yield only an image, even though the provider uses a live transport.
+  await page.locator("#source-open").click();
+  await page.locator("#model-file").setInputFiles("ref_material/materials/references/person.png");
+  await page.waitForFunction(() => document.querySelector("#source-description").textContent.includes("照片"));
+  await page.locator("#source-done").click();
+  await page.locator("#start").click();
+  await page.waitForFunction(() => !document.querySelector("#start").disabled);
+  assert.equal(await page.locator("#result-photo").isVisible(), true);
+  assert.equal(await page.locator("#save-video").isHidden(), true);
+  const photoEvent = page.waitForEvent("download");
+  await page.locator("#save-photo").click();
+  await (await photoEvent).saveAs(".local/verification/test-only-photo.jpg");
+  assert.ok((await stat(".local/verification/test-only-photo.jpg")).size > 1000);
 
   // Native camera exercise: recorded WebM, measured duration and frame extraction.
   await page.locator("#source-open").click();
@@ -243,6 +264,20 @@ try {
     ),
     null,
   );
+
+  // Unsupported recording must not quietly turn a video request into an image.
+  const supported = await page.evaluate(() => {
+    globalThis.savedSupport = MediaRecorder.isTypeSupported;
+    MediaRecorder.isTypeSupported = () => false;
+    return true;
+  });
+  assert.equal(supported, true);
+  await page.locator("#start").click();
+  await page.waitForFunction(() => !document.querySelector("#start").disabled);
+  assert.match(await page.locator("#status").textContent(), /录制格式/);
+  assert.equal(await page.locator("#result-actions").isHidden(), true);
+  assert.equal(await page.locator("#result-photo").isHidden(), true);
+  await page.evaluate(() => { MediaRecorder.isTypeSupported = globalThis.savedSupport; });
 
   const long = ".local/verification/too-long.mp4";
   const made = spawnSync("ffmpeg", [
@@ -270,7 +305,7 @@ try {
   );
   await page.locator("#source-done").click();
   assert.deepEqual(errors, []);
-  assert.equal(starts, 3);
+  assert.equal(starts, 5);
   const report = {
     success: true,
     realApiCalls: 0,
@@ -279,6 +314,11 @@ try {
       "consent gating",
       "photo generation lifecycle",
       "playable short video download",
+      "1.6s and 8s input/output duration match",
+      "HD external input with adaptive quality disabled",
+      "image input produces image only",
+      "results visible before delayed revocation",
+      "recording failure does not fall back to image",
       "original comparison",
       "safe product import",
       "parse fallback and purchase link",

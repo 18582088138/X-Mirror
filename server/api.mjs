@@ -163,7 +163,10 @@ export function createApi({
         ),
       };
     },
-    async start(owner, requestId) {
+    async start(owner, requestId, sourceSeconds) {
+      const outputSeconds = sourceSeconds === undefined ? config.outputSeconds : sourceSeconds;
+      if (typeof outputSeconds !== "number" || !Number.isFinite(outputSeconds) || outputSeconds <= 0 || outputSeconds > 10.15)
+        throw new ApiError("视频时长必须在 0～10 秒以内");
       if (!/^[a-zA-Z0-9-]{16,64}$/.test(requestId || ""))
         throw new ApiError("无效的提交标识");
       if (!env.XMAX_API_KEY?.trim()) throw new ApiError("服务尚未配置试穿 API");
@@ -230,7 +233,7 @@ export function createApi({
           lease: current.lease,
           temporaryApiKey: current.key,
           environment: config.environment,
-          outputSeconds: config.outputSeconds,
+          outputSeconds,
           sessionSeconds: remainingSeconds,
         };
       } catch (error) {
