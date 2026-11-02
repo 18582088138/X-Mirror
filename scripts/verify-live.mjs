@@ -2,6 +2,7 @@ import { chromium } from "@playwright/test";
 import { mkdir, writeFile, stat } from "node:fs/promises";
 import { loadEnv } from "vite";
 import assert from "node:assert/strict";
+import { inspectPlayback } from './playback-check.mjs';
 if (!process.argv.includes("--real-api"))
   throw new Error("真实 API 验证会产生费用，请运行 npm run test:live");
 const env = { ...loadEnv("development", process.cwd(), ""), ...process.env };
@@ -158,10 +159,14 @@ try {
           const { hasVisibleFrame } = await import("/src/media.ts");
           return { ready: video.readyState, playing: !video.paused, duration: video.duration, width: video.videoWidth, height: video.videoHeight, visiblePixels: hasVisibleFrame(video) };
         });
-        assert.ok(playback.ready >= 2 && playback.playing && playback.visiblePixels, "real result must be decoded, visible and playing");
+        assert.ok(playback.ready >= 2 && playback.visiblePixels, "real result must be decoded and visible");
         const expected = metrics.at(-1).sourceDuration;
         assert.ok(Math.abs(playback.duration - expected) < 0.01, "browser output duration must match input");
+        assert.ok((playback.width === 1920 && playback.height === 1080) || (playback.width === 1080 && playback.height === 1920), 'native result must be standard 1080P');
         record.playback = playback;
+        record.sustainedPlayback = await page.locator('#result-video').evaluate(inspectPlayback);
+        assert.ok(Math.abs(record.sustainedPlayback.elapsed - expected) < 1, 'result must run at normal speed');
+        assert.ok(record.sustainedPlayback.lastTime > expected - 0.2, 'GUI must present frames near the real clip end');
       }
       const event = page.waitForEvent("download");
       await page.locator(name === "image" ? "#save-photo" : "#save-video").click();

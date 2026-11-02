@@ -67,8 +67,10 @@ export class XmaxClient {
         local = new MediaStream([options.videoTrack]);
         return { videoTrack: options.videoTrack };
       },
-      createLocalImageStream: async () => {
+      createLocalImageStream: async (options) => {
         globalThis.mockInput = "photo";
+        globalThis.mockImageFile = { name: options.file.name, type: options.file.type, size: options.file.size };
+        globalThis.mockFormat = { width: 1408, height: 1408 };
         return localStream();
       },
       createLocalVideoStream: async () => {

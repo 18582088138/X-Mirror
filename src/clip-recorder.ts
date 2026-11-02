@@ -12,6 +12,7 @@ export class ClipRecorder {
   private ready: Promise<void>;
   private readonly durationUs: number;
   private readonly step = 33333;
+  readonly statistics = { frames: 0, skipped: 0 };
   static async supported(width: number, height: number) {
     if (typeof VideoEncoder === "undefined" || typeof VideoFrame === "undefined") return false;
     try { return !!(await VideoEncoder.isConfigSupported({ codec: "vp8", width, height })).supported; }
@@ -24,7 +25,11 @@ export class ClipRecorder {
       this.reject = reject;
       this.worker.onmessage = ({ data }) => {
         if (data.type === "ready") { clearTimeout(timeout); resolve(); }
-        if (data.type === "ack") this.pending--;
+        if (data.type === "ack") {
+          this.pending--;
+          if (data.encoded) this.statistics.frames++;
+          else this.statistics.skipped++;
+        }
         if (data.type === "done") this.done?.(data.buffer);
         if (data.type === "error") { clearTimeout(timeout); this.fail(new Error(data.message)); onError(); }
       };
@@ -40,6 +45,7 @@ export class ClipRecorder {
     this.timer = setInterval(() => {
       const timestamp = Math.round((performance.now() - this.started) * 1000);
       if (timestamp < this.durationUs - this.step && this.pending < 3) this.frame(timestamp);
+      else if (timestamp < this.durationUs - this.step) this.statistics.skipped++;
       else if (timestamp >= this.durationUs - this.step) clearInterval(this.timer);
     }, 1000 / 30);
   }

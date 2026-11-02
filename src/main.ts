@@ -73,10 +73,10 @@ $("app").innerHTML = `
    <img id="person-preview" class="hero-media" alt="人物原始画面" hidden>
    <video id="person-video" class="hero-media" muted autoplay loop playsinline aria-label="人物原始视频" hidden></video>
    <img id="result-photo" class="hero-media" alt="AI 生成的试穿照片" hidden>
-   <video id="result-video" class="hero-media" muted loop playsinline controls hidden></video>
+   <video id="result-video" class="hero-media" muted playsinline controls preload="auto" hidden></video>
    <div id="remote" class="hero-media remote" hidden></div>
    <div class="loading" id="loading" hidden><span class="spinner"></span><strong id="loading-text">正在准备你的新造型</strong><p>一点灵感，换一种可能。</p></div>
-   <button class="comparison" id="compare" disabled title="对比原始画面"><img id="original-thumb" alt="原始人物缩略图"><span>${icon("person")}原始画面</span></button>
+   <button class="comparison" id="compare" disabled title="对比原始画面"><video id="original-thumb-video" muted playsinline hidden></video><img id="original-thumb" alt="原始人物缩略图"><span>${icon("person")}原始画面</span></button>
    <div class="stage-footer"><div><span class="eyebrow">YOUR NEXT LOOK</span><p id="stage-caption">一段视频，无限穿搭灵感。</p></div><span class="stage-edition">THE FITTING EDIT <b>01</b></span></div>
    <div id="result-actions" class="result-actions" hidden><button id="save-photo">${icon("download")}保存照片</button><button id="save-video" hidden>${icon("play")}保存短片</button><button id="back-original">${icon("person")}查看原图</button></div>
  </section>
@@ -85,7 +85,7 @@ $("app").innerHTML = `
    <h1>下一套风格，<br>先穿上看看。</h1><p class="intro">带上真实的你，试试心动的衣服。</p>
    <fieldset id="input-controls">
     <div class="section-label"><span><b>01</b> 把你带进试衣间</span><span class="muted">全身 / 半身均可</span></div>
-    <div class="source-card"><button id="source-open" class="source-choice"><img id="source-thumb" alt="当前人物素材" hidden><span class="source-placeholder" id="source-placeholder">${icon("person")}</span><span><strong id="source-name">添加人物素材</strong><small id="source-description">上传短视频，或用摄像头录制</small></span><span class="source-change">更换 ${icon("arrow")}</span></button><button class="camera-shortcut" id="camera-open" aria-label="摄像头录制" title="摄像头录制">${icon("camera")}</button></div>
+    <div class="source-card"><button id="source-open" class="source-choice"><video id="source-thumb-video" muted playsinline hidden></video><img id="source-thumb" alt="当前人物素材" hidden><span class="source-placeholder" id="source-placeholder">${icon("person")}</span><span><strong id="source-name">添加人物素材</strong><small id="source-description">上传短视频，或用摄像头录制</small></span><span class="source-change">更换 ${icon("arrow")}</span></button><button class="camera-shortcut" id="camera-open" aria-label="摄像头录制" title="摄像头录制">${icon("camera")}</button></div>
     <div class="mode-row"><div class="segmented" aria-label="根据人物素材自动选择输出类型"><button id="mode-photo" class="selected" aria-pressed="true">试穿照片</button><button id="mode-video" aria-pressed="false">动态短片</button></div><span id="mode-note">保存一张试穿照片</span></div>
     <div class="section-label" id="outfit"><span><b>02</b> 搭配你的下一套</span><span class="muted" id="outfit-count">选择心动的单品</span></div>
     <div id="slots" class="outfit-slots" aria-label="搭配槽位"></div>
@@ -112,11 +112,10 @@ $("app").innerHTML = `
  <p class="field-note">视频建议 5 秒，最长 10 秒、最大 30 MB。单人、光线充足、身体无遮挡。</p>
  <label class="coverage">人物入镜范围<select id="coverage"><option value="full">全身（腿部完整入镜）</option><option value="half">半身（主要试上衣 / 配饰）</option></select></label>
  <div id="camera-panel" class="camera-panel" hidden><video id="camera-preview" muted autoplay playsinline></video><div><span id="camera-clock">准备好后开始录制</span><button id="record-toggle" class="outline">开始录制</button><button id="camera-close" class="text-button">关闭摄像头</button></div></div>
- <div id="frame-picker" hidden><p class="section-label">选择视频封面 <span class="muted">试穿使用原视频的动作</span></p><div id="frames" class="frames"></div></div>
  <div id="demo-models" class="demo-models" hidden><span class="eyebrow">或先用本地参考素材体验</span><div><button data-model="studio">${icon("play")}全身视频</button><button data-model="woman">${icon("play")}半身视频</button><button data-model="man">${icon("play")}男模视频</button></div></div>
  <p id="source-status" class="status" role="status"></p><button id="source-done" class="primary">使用这个人物 ${icon("check")}</button>
 </dialog>
-<dialog id="guide-dialog" class="guide-dialog"><div class="dialog-heading"><h2>让试穿效果更自然。</h2><button class="icon-button" data-close="guide-dialog" aria-label="关闭使用指南">${icon("close")}</button></div><ol><li><strong>拍一段真实的你。</strong><p>建议 5 秒，最长 10 秒。保持单人、明亮、无遮挡；试下装时让腿部完整入镜。</p></li><li><strong>选一张清晰画面。</strong><p>视频输入生成同长度视频，照片输入生成照片。视频封面只用于缩略图。</p></li><li><strong>添加想试的单品。</strong><p>粘贴商品链接或上传清晰正面图片。页面需要登录、验证码或无法读取时，补传图片即可。</p></li><li><strong>试好了，再去购买。</strong><p>保存照片或短片，点击商品入口前往商家。上传图片时也可以在链接栏补充购买链接。</p></li></ol><p class="guide-privacy">视频素材的画面会实时传给 XMAX，音频不发送；照片素材以静态画面流处理。视频封面只用于缩略图。服饰参考图上传至 XMAX 存储，第三方保存规则见其隐私政策。本应用不保存人物和结果素材，刷新页面后需重新上传。</p><p id="demo-attribution" class="field-note" hidden>示例牛仔裤照片：A Continuous Lean，<a href="https://commons.wikimedia.org/wiki/File:Tellason_jeans,_front.jpg" target="_blank" rel="noopener noreferrer">原图</a> · <a href="https://creativecommons.org/licenses/by/2.0/" target="_blank" rel="noopener noreferrer">CC BY 2.0</a>，已缩小尺寸。</p><a href="https://22duck.cn/docs/resources/privacy/" target="_blank" rel="noopener noreferrer">查看 XMAX 隐私政策 ↗</a><p class="field-note">配饰与多件组合效果仍需逐款确认；试穿图片不能替代真实尺码判断。</p></dialog>`;
+<dialog id="guide-dialog" class="guide-dialog"><div class="dialog-heading"><h2>让试穿效果更自然。</h2><button class="icon-button" data-close="guide-dialog" aria-label="关闭使用指南">${icon("close")}</button></div><ol><li><strong>拍一段真实的你。</strong><p>建议 5 秒，最长 10 秒。保持单人、明亮、无遮挡；试下装时让腿部完整入镜。</p></li><li><strong>上传原视频或照片。</strong><p>视频输入生成同长度视频，照片输入生成照片。视频连续输入，保留原片动作。</p></li><li><strong>添加想试的单品。</strong><p>粘贴商品链接或上传清晰正面图片。页面需要登录、验证码或无法读取时，补传图片即可。</p></li><li><strong>试好了，再去购买。</strong><p>保存照片或短片，点击商品入口前往商家。上传图片时也可以在链接栏补充购买链接。</p></li></ol><p class="guide-privacy">视频素材的画面会实时传给 XMAX，音频不发送；照片素材通过 SDK 原图输入处理。服饰参考图上传至 XMAX 存储，第三方保存规则见其隐私政策。本应用不保存人物和结果素材，刷新页面后需重新上传。</p><p id="demo-attribution" class="field-note" hidden>示例牛仔裤照片：A Continuous Lean，<a href="https://commons.wikimedia.org/wiki/File:Tellason_jeans,_front.jpg" target="_blank" rel="noopener noreferrer">原图</a> · <a href="https://creativecommons.org/licenses/by/2.0/" target="_blank" rel="noopener noreferrer">CC BY 2.0</a>，已缩小尺寸。</p><a href="https://22duck.cn/docs/resources/privacy/" target="_blank" rel="noopener noreferrer">查看 XMAX 隐私政策 ↗</a><p class="field-note">配饰与多件组合效果仍需逐款确认；试穿图片不能替代真实尺码判断。</p></dialog>`;
 
 function status(message: string, error = false) {
   $("status").textContent = message;
@@ -200,8 +199,17 @@ function showOriginal(visible: boolean) {
 function renderSource() {
   if (!source) return;
   for (const id of ["source-thumb", "person-preview", "original-thumb"]) {
-    $<HTMLImageElement>(id).src = source.poster;
-    $(id).hidden = false;
+    if (source.poster) $<HTMLImageElement>(id).src = source.poster;
+    else $(id).removeAttribute("src");
+    $(id).hidden = source.isVideo;
+  }
+  for (const id of ["source-thumb-video", "original-thumb-video"]) {
+    const preview = $<HTMLVideoElement>(id);
+    preview.hidden = !source.isVideo;
+    if (source.isVideo) {
+      preview.onloadeddata = () => { preview.currentTime = Math.min(0.01, source!.duration / 2); };
+      preview.src = source.url;
+    } else { preview.removeAttribute("src"); preview.load(); }
   }
   const video = $<HTMLVideoElement>("person-video");
   if (source.isVideo && video.getAttribute("src") !== source.url)
@@ -216,26 +224,6 @@ function renderSource() {
   $("source-name").textContent = source.file.name;
   $("source-description").textContent =
     `${source.coverage === "full" ? "全身" : "半身"} · ${source.isVideo ? `${source.duration.toFixed(1)} 秒视频` : "照片"} · 本地素材`;
-  $("frames").replaceChildren();
-  source.frames.forEach((frame, index) => {
-    const button = document.createElement("button");
-    button.className = `frame ${source?.poster === frame ? "selected" : ""}`;
-    button.setAttribute("aria-label", `选择第 ${index + 1} 帧`);
-    button.setAttribute("aria-pressed", String(source?.poster === frame));
-    const image = document.createElement("img");
-    image.src = frame;
-    image.alt = `候选画面 ${index + 1}`;
-    button.append(image);
-    button.onclick = () => {
-      if (source) {
-        source.poster = frame;
-        clearResult();
-        renderSource();
-      }
-    };
-    $("frames").append(button);
-  });
-  $("frame-picker").hidden = source.frames.length < 2;
   $<HTMLSelectElement>("coverage").value = source.coverage;
   setMode();
   controls();
@@ -247,7 +235,7 @@ async function setSource(
 ) {
   if (busy || finishing || loadingSource) return;
   loadingSource = true;
-  $("source-status").textContent = "正在读取素材与候选画面…";
+  $("source-status").textContent = "正在读取原始素材…";
   controls();
   try {
     const next = await readSource(file, coverage, recordedDuration);
@@ -256,7 +244,7 @@ async function setSource(
     createdURLs.add(next.url);
     clearResult();
     renderSource();
-    $("source-status").textContent = "人物素材已准备好，可以选择清晰画面。";
+    $("source-status").textContent = source.isVideo ? `原视频已就绪 · ${source.duration.toFixed(2)} 秒，将输出同长度视频。` : "原照片已就绪，将输出试穿照片。";
     status("人物已就绪，搭配好后点击「一键试穿」。");
   } catch (error) {
     $("source-status").textContent = safeError(error);
@@ -741,6 +729,7 @@ async function showResult() {
         const loaded = waitMedia(video, "loadeddata");
         video.src = resultURL;
         await loaded;
+        video.playbackRate = 1;
       }
       await video.play();
       video.hidden = false;
@@ -757,10 +746,10 @@ async function showResult() {
   }
   $("stage-label").innerHTML = comparing
     ? `${icon("person")}原始画面`
-    : `${icon("check")}${result.video && !result.complete ? "未完成的短片" : "试穿完成"}`;
+    : `${icon("check")}${result.video && !result.complete ? "未完成的短片" : "试穿完成"}${result.video ? ` · ${result.duration?.toFixed(2)} 秒` : " · 照片"}`;
   $("stage-caption").textContent = comparing
     ? "真实的你。"
-    : lastOutfit.map((item) => item.name).join(" + ");
+    : `${result.video ? `${result.duration?.toFixed(2)} 秒视频 · ` : "试穿照片 · "}${result.width} × ${result.height} · ${lastOutfit.map((item) => item.name).join(" + ")}`;
   $("compare").classList.toggle("comparing", comparing);
   $("result-actions").hidden = false;
   $("save-video").hidden = !result?.video;
@@ -815,13 +804,15 @@ async function end(error?: string) {
     const startup = clickToFirstFrameMs ? ` · 首帧 ${(clickToFirstFrameMs/1000).toFixed(1)} 秒` : "";
     const transport = result?.transport?.endToEndDelayMs;
     const latency = transport === undefined ? "" : ` · RTC 媒体延迟约 ${Math.round(transport)}ms`;
+    const fps = result?.playback ? ` · 接收 ${result.playback.fps.toFixed(1)}fps` : "";
     status(error || (result
-      ? `${partial ? "已保存未完成的视频片段" : "试穿已完成"} · ${dimensions}${result.video ? ` · ${result.duration?.toFixed(2)} 秒` : ""}${startup}${latency}。`
+      ? `${partial ? "已保存未完成的视频片段" : "试穿已完成"} · ${dimensions}${result.video ? ` · ${result.duration?.toFixed(2)} 秒` : ""}${startup}${latency}${fps}。`
       : "本次生成已停止，尚未收到可保存的结果。"), !!error || partial);
     window.dispatchEvent(new CustomEvent("xmirror:metrics", {detail: {
       width: result?.width, height: result?.height, duration: result?.duration,
       sourceDuration: source?.duration, complete: result?.complete,
       remoteUserID: result?.remoteUserID, clickToFirstFrameMs, startupMs: result?.startupMs, timing: result?.timing, transport: result?.transport,
+      playback: result?.playback, recording: result?.recording,
     }}));
     // Present the saved media before network cleanup completes; keep new sessions locked.
     await current?.cleanup;
@@ -862,7 +853,7 @@ $("start").onclick = async () => {
   $("loading-text").textContent = "正在准备你的新造型";
   status("正在整理搭配素材…");
   try {
-    const [reference, { TryOnSession }] = await Promise.all([buildReference(outfit, source.poster), providerModule]);
+    const [reference, { TryOnSession }] = await Promise.all([buildReference(outfit), providerModule]);
     if (!valid()) return;
     status("正在创建限额试穿会话…");
     pendingTicket = api<Ticket>("/api/start", {

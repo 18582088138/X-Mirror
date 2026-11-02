@@ -289,7 +289,7 @@ button svg {
   backdrop-filter: blur(6px);
   opacity: 1 !important;
 }
-.comparison img {
+.comparison img, .comparison video {
   width: 100%;
   height: 100%;
   object-fit: contain;
@@ -500,7 +500,7 @@ fieldset {
   border-radius: 6px;
   text-align: left;
 }
-.source-choice > img {
+.source-choice > img, .source-choice > video {
   width: 39px;
   height: 49px;
   object-fit: cover;

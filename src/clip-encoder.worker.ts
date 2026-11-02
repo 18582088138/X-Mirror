@@ -31,9 +31,10 @@ port.onmessage = async ({ data }) => {
       try { encoder.encode(data.frame, { keyFrame: true }); }
       finally { data.frame.close(); }
     } else if (data.type === "frame") {
+      let encoded = false;
       try {
-        if (encoder.encodeQueueSize < 3 || data.keyFrame) { encoder.encode(data.frame, { keyFrame: data.keyFrame }); frames++; }
-      } finally { data.frame.close(); port.postMessage({ type: "ack" }); }
+        if (encoder.encodeQueueSize < 3 || data.keyFrame) { encoder.encode(data.frame, { keyFrame: data.keyFrame }); frames++; encoded = true; }
+      } finally { data.frame.close(); port.postMessage({ type: "ack", encoded }); }
     } else if (data.type === "finish") {
       await encoder.flush();
       if (frames < 2) throw new Error("未收到足够的视频画面");

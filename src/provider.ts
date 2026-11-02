@@ -15,7 +15,7 @@ import {
   type RemoteMediaTracks,
   type XmaxRealtimeManaging,
 } from "@xmaxai/web-sdk";
-import { loadImage, waitMedia, normalizeRecording, hasVisibleFrame, validateOutputVideo, type Source } from "./media";
+import { waitMedia, normalizeRecording, hasVisibleFrame, validateOutputVideo, type Source } from "./media";
 
 export type Ticket = {
   lease: string;
@@ -36,17 +36,13 @@ export type Result = {
   transport?: DownlinkVideoStatistics;
   remoteUserID?: string;
   failure?: string;
+  playback?: { frames: number; fps: number; maxGapMs: number };
+  recording?: { frames: number; skipped: number };
 };
 export class TryOnSession {
   private manager?: XmaxRealtimeManaging;
-  private view = new XmaxRealtimeVideoView({
-    videoContentMode: VideoContentMode.fit,
-    isInteractionEnabled: false,
-  });
-  private localView = new XmaxRealtimeVideoView({
-    videoContentMode: VideoContentMode.fit,
-    isInteractionEnabled: false,
-  });
+  private view = new XmaxRealtimeVideoView({ videoContentMode: VideoContentMode.fit, isInteractionEnabled: false });
+  private localView = new XmaxRealtimeVideoView({ videoContentMode: VideoContentMode.fit, isInteractionEnabled: false });
   private localContainer = document.createElement("div");
   private remoteVideo = document.createElement("video");
   private rawTrack?: MediaStreamTrack;
@@ -69,6 +65,10 @@ export class TryOnSession {
   private inputStream?: MediaStream;
   private paintTimer?: ReturnType<typeof setInterval>;
   private targetSeconds = 0;
+  private remoteFrameCallback?: number;
+  private receivedFrames = 0;
+  private lastReceivedAt = 0;
+  private maxReceivedGap = 0;
   cleanup: Promise<void> = Promise.resolve();
   constructor(
     private container: HTMLElement,
@@ -93,7 +93,7 @@ export class TryOnSession {
     });
     document.body.append(this.localContainer);
     this.localView.attach(this.localContainer);
-    this.view.attach(this.localContainer); // SDK timing/preview warmup stays offscreen.
+    this.view.attach(this.localContainer);
   }
   async start(
     ticket: Ticket,
@@ -170,6 +170,10 @@ export class TryOnSession {
       if (++this.visibleFrames < 3) return;
       this.result.width = video.videoWidth;
       this.result.height = video.videoHeight;
+      if (source.isVideo && !((video.videoWidth === 1920 && video.videoHeight === 1080) || (video.videoWidth === 1080 && video.videoHeight === 1920))) {
+        this.onEnd(this.result, `服务返回 ${video.videoWidth} × ${video.videoHeight}，未达到请求的 1080P，请重新试穿`);
+        return;
+      }
       if (!this.startedFrames) {
         this.preparingRecording = true;
         this.result.startupMs = performance.now() - launched;
@@ -191,6 +195,9 @@ export class TryOnSession {
         }
         if (!hasVisibleFrame(video)) { this.onEnd(this.result, "远端试穿画面为空，请重新生成"); return; }
         this.recordedAt = performance.now();
+        this.receivedFrames = 0;
+        this.lastReceivedAt = 0;
+        this.maxReceivedGap = 0;
         this.clipRecorder?.start(this.recordedAt);
         if (this.recorder) this.recorder.start(300);
         this.startedFrames = true;
@@ -200,14 +207,6 @@ export class TryOnSession {
           this.result.complete = true;
           this.onEnd(this.result);
         }, (mode === "video" ? source.duration : 1) * 1000);
-      }
-      // For video, capture only a cover; do not repeatedly encode full-HD JPEGs.
-      if (mode === "photo" || !this.result.photo) {
-        const canvas = document.createElement("canvas");
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        canvas.getContext("2d")!.drawImage(video, 0, 0);
-        this.result.photo = canvas.toDataURL("image/jpeg", 0.95);
       }
     }, 50);
   }
@@ -227,6 +226,20 @@ export class TryOnSession {
     this.rawTrack = tracks.videoTrack;
     this.result.remoteUserID = tracks.userID;
     this.remoteVideo.srcObject = new MediaStream([tracks.videoTrack]);
+    // Count presented RTC frames separately from re-encoded frames. A 30fps
+    // recording can repeat a slow upstream frame and must not be called 30fps AI.
+    const observe = (at: number) => {
+      if (this.stopped) return;
+      if (this.startedFrames) {
+        if (this.lastReceivedAt) this.maxReceivedGap = Math.max(this.maxReceivedGap, at - this.lastReceivedAt);
+        this.lastReceivedAt = at;
+        this.receivedFrames++;
+      }
+      this.remoteFrameCallback = this.remoteVideo.requestVideoFrameCallback(observe);
+    };
+    if (this.remoteFrameCallback !== undefined) this.remoteVideo.cancelVideoFrameCallback(this.remoteFrameCallback);
+    if (this.remoteVideo.requestVideoFrameCallback)
+      this.remoteFrameCallback = this.remoteVideo.requestVideoFrameCallback(observe);
     tracks.videoTrack.addEventListener("ended", () => {
       if (!this.stopped) this.onEnd(this.result, "远端生成视频已中断");
     }, { once: true });
@@ -234,39 +247,41 @@ export class TryOnSession {
       this.onEnd(this.result, "浏览器无法播放远端试穿视频，请更换浏览器重试"));
   }
   private async prepareHDInput(realtime: XmaxRealtimeManaging, source: Source) {
-    let media: HTMLVideoElement | HTMLImageElement;
-    if (source.isVideo) {
-      const video = document.createElement("video");
-      this.inputVideo = video;
-      video.muted = true;
-      video.playsInline = true;
-      video.loop = false;
-      this.localContainer.append(video);
-      const ready = waitMedia(video, "loadeddata");
-      video.src = source.url;
-      await ready;
-      // Metadata/loadeddata alone can leave a paused video with blank pixels.
-      // Seek into its first frame before drawing/publishing the HD canvas.
-      const sought = waitMedia(video, "seeked");
-      video.currentTime = Math.min(0.01, source.duration / 2);
-      await sought;
-      if (!hasVisibleFrame(video)) throw new Error("人物视频首帧为空，请更换视频或重新上传");
-      media = video;
-    } else media = await loadImage(source.url);
+    if (!source.isVideo) {
+      // The SDK receives the original File, preserving the full photo.
+      return realtime.createLocalImageStream({
+        file: source.file,
+        videoFormat: new RealtimeVideoFormat({ width: 1920, height: 1080, fps: 30, minimumBitrate: 2000, maximumBitrate: 8000 }),
+      });
+    }
+    const video = document.createElement("video");
+    this.inputVideo = video;
+    video.muted = true;
+    video.playsInline = true;
+    video.loop = false;
+    this.localContainer.append(video);
+    const ready = waitMedia(video, "loadeddata");
+    video.src = source.url;
+    await ready;
+    // Metadata/loadeddata alone can leave a paused video with blank pixels.
+    // Seek into its first frame before drawing/publishing the HD canvas.
+    const sought = waitMedia(video, "seeked");
+    video.currentTime = Math.min(0.01, source.duration / 2);
+    await sought;
+    if (!hasVisibleFrame(video)) throw new Error("人物视频首帧为空，请更换视频或重新上传");
     if (this.stopped) throw new Error("会话已停止");
-    const width = media instanceof HTMLVideoElement ? media.videoWidth : media.naturalWidth;
-    const height = media instanceof HTMLVideoElement ? media.videoHeight : media.naturalHeight;
-    const ratio = width / height;
-    const sizes = [[1920,1080], [1080,1920], [1408,1408], [1152,1536], [1536,1152]];
-    const [w,h] = sizes.sort((a,b) =>
-      Math.abs(Math.log(ratio / (a[0]/a[1]))) - Math.abs(Math.log(ratio / (b[0]/b[1]))))[0];
+    const width = video.videoWidth;
+    const height = video.videoHeight;
+    // Standard 1080P, including near-square sources. Preserve the complete
+    // original media with padding; never stretch/crop it or upscale the result.
+    const [w,h] = width >= height ? [1920,1080] : [1080,1920];
     const canvas = document.createElement("canvas");
     canvas.width = w; canvas.height = h;
     const ctx = canvas.getContext("2d")!;
     const scale = Math.min(w/width, h/height);
     const draw = () => {
       ctx.fillStyle = "#fff"; ctx.fillRect(0,0,w,h);
-      ctx.drawImage(media, (w-width*scale)/2, (h-height*scale)/2, width*scale, height*scale);
+      ctx.drawImage(video, (w-width*scale)/2, (h-height*scale)/2, width*scale, height*scale);
     };
     draw();
     this.paintTimer = setInterval(draw, 1000/30);
@@ -329,6 +344,7 @@ export class TryOnSession {
   stop(): Promise<Result> {
     if (this.closing) return this.closing;
     this.stopped = true;
+    if (this.remoteFrameCallback !== undefined) this.remoteVideo.cancelVideoFrameCallback(this.remoteFrameCallback);
     clearTimeout(this.timer);
     clearInterval(this.frameTimer);
     clearInterval(this.paintTimer);
@@ -342,6 +358,7 @@ export class TryOnSession {
         try {
           const blob = await this.clipRecorder.finish(elapsed);
           Object.assign(this.result, await validateOutputVideo(blob, elapsed / 1000));
+          this.result.recording = this.clipRecorder.statistics;
           this.result.video = blob;
         }
         catch { this.result.failure = "视频保存失败，未生成可播放的完整短片"; this.result.complete = false; }
@@ -375,6 +392,17 @@ export class TryOnSession {
         }
       }
       this.recordTrack?.stop();
+      if (this.result.duration && typeof this.remoteVideo.requestVideoFrameCallback === "function")
+        this.result.playback = { frames: this.receivedFrames, fps: this.receivedFrames / this.result.duration, maxGapMs: Math.round(this.maxReceivedGap) };
+      // Encode the still/cover once after recording. JPEG encoding on the UI
+      // thread during capture can stall both input and output presentation.
+      if (!this.result.photo && this.startedFrames && hasVisibleFrame(this.remoteVideo)) {
+        const canvas = document.createElement("canvas");
+        canvas.width = this.remoteVideo.videoWidth;
+        canvas.height = this.remoteVideo.videoHeight;
+        canvas.getContext("2d")!.drawImage(this.remoteVideo, 0, 0);
+        this.result.photo = canvas.toDataURL("image/jpeg", 0.95);
+      }
       this.remoteVideo.pause();
       this.remoteVideo.srcObject = null;
       this.manager?.setRemoteMediaTracksListener(undefined);

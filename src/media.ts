@@ -2,7 +2,6 @@ export type Source = {
   file: File;
   url: string;
   poster: string;
-  frames: string[];
   duration: number;
   coverage: "full" | "half";
   isVideo: boolean;
@@ -98,7 +97,9 @@ export async function validateOutputVideo(blob: Blob, expectedSeconds: number) {
     await ready;
     if (!Number.isFinite(video.duration) || Math.abs(video.duration - expectedSeconds) > 0.15)
       throw new Error("生成短片时长不正确，已阻止显示为完成，请重新试穿");
-    for (const time of [0, video.duration / 2, Math.max(0, video.duration - 0.1)]) {
+    // Force the decoder to render the first picture; loadeddata with time=0
+    // alone can still leave a paused video texture blank in embedded browsers.
+    for (const time of [Math.min(0.01, video.duration / 2), video.duration / 2, Math.max(0, video.duration - 0.1)]) {
       if (Math.abs(video.currentTime - time) > 0.001) {
         const seek = waitMedia(video, "seeked");
         video.currentTime = time;
@@ -106,7 +107,10 @@ export async function validateOutputVideo(blob: Blob, expectedSeconds: number) {
       }
       if (!hasVisibleFrame(video)) throw new Error("生成短片包含空白画面，已阻止显示为完成，请重新试穿");
     }
-    return { duration: video.duration, width: video.videoWidth, height: video.videoHeight };
+    const cover = document.createElement("canvas");
+    cover.width = video.videoWidth; cover.height = video.videoHeight;
+    cover.getContext("2d")!.drawImage(video, 0, 0);
+    return { duration: video.duration, width: video.videoWidth, height: video.videoHeight, photo: cover.toDataURL("image/jpeg", 0.95) };
   } finally {
     video.removeAttribute("src"); video.load(); URL.revokeObjectURL(url);
   }
@@ -160,7 +164,6 @@ export async function readSource(
       file,
       url,
       poster: url,
-      frames: [url],
       duration: 0,
       coverage,
       isVideo: false,
@@ -184,31 +187,10 @@ export async function readSource(
       throw new Error("视频时长无法读取，请上传普通 MP4 文件");
     if (duration > 10.15)
       throw new Error("视频最长支持 10 秒，请截取 5～10 秒后再上传");
-    const scale = Math.min(
-      1,
-      1280 / Math.max(video.videoWidth, video.videoHeight),
-    );
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.round(video.videoWidth * scale);
-    canvas.height = Math.round(video.videoHeight * scale);
-    const frames: string[] = [];
-    for (let i = 0; i < 5; i++) {
-      const time = Math.min(duration - 0.05, duration * (0.08 + i * 0.2));
-      if (Math.abs(video.currentTime - time) > 0.001) {
-        const ready = waitMedia(video, "seeked");
-        video.currentTime = Math.max(0, time);
-        await ready;
-      }
-      canvas
-        .getContext("2d")!
-        .drawImage(video, 0, 0, canvas.width, canvas.height);
-      frames.push(canvas.toDataURL("image/jpeg", 0.86));
-    }
     return {
       file,
       url,
-      poster: frames[1],
-      frames,
+      poster: "", // Video previews use the original video element, never JPEG samples.
       duration,
       coverage,
       isVideo: true,
@@ -223,18 +205,14 @@ export async function readSource(
   }
 }
 
-export async function buildReference(garments: Garment[], poster: string) {
+export async function buildReference(garments: Garment[]) {
   if (garments.length === 1)
     return {
       file: await imageFile(garments[0].image, "garment.jpg"),
       layout: `参考图为${labels[garments[0].category]}${garments[0].accessory ? `（${garments[0].accessory}）` : ""}`,
     };
-  const person = await loadImage(poster);
   const height = 2048;
-  const width = Math.max(
-    768 * garments.length,
-    Math.min(3072, Math.round((height * person.width) / person.height)),
-  );
+  const width = 1024 * garments.length;
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;

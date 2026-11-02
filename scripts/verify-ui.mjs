@@ -2,6 +2,7 @@ import { chromium } from "@playwright/test";
 import assert from "node:assert/strict";
 import { readFile, mkdir, stat, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
+import { inspectPlayback } from './playback-check.mjs';
 
 await mkdir(".local/verification", { recursive: true });
 const browser = await chromium.launch({
@@ -41,7 +42,7 @@ try {
         active,
         remaining: null,
         outputSeconds: 3,
-        sessionSeconds: 15,
+        sessionSeconds: 30,
         demoEnabled: true,
       };
     else if (path === "/api/catalog") {
@@ -56,7 +57,7 @@ try {
         temporaryApiKey: "tk-test-only",
         environment: "china",
         outputSeconds: route.request().postDataJSON().sourceSeconds,
-        sessionSeconds: 15,
+        sessionSeconds: 30,
       };
     } else if (path === "/api/finish") {
       if (finishDelay) await new Promise((resolve) => setTimeout(resolve, finishDelay));
@@ -74,7 +75,7 @@ try {
     } else throw new Error(`Unhandled test API: ${path}`);
     await route.fulfill({ json: data });
   });
-  await page.goto("http://127.0.0.1:5180", { waitUntil: "domcontentloaded" });
+  await page.goto(process.env.TEST_BASE_URL || "http://127.0.0.1:5180", { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() =>
     document.querySelector("#source-name")?.textContent.includes("Studio"),
   );
@@ -125,7 +126,10 @@ try {
     console.log(JSON.stringify({ status: await page.locator("#status").textContent(), errors }));
     throw error;
   }
-  await page.waitForFunction(() => document.querySelector("#stage-label").textContent.includes("正在试穿"));
+  await page.waitForFunction(() => document.querySelector("#stage-label").textContent.includes("正在试穿")).catch(async error => {
+    console.log(JSON.stringify({ status: await page.locator('#status').textContent(), label: await page.locator('#stage-label').textContent(), errors, mock: await page.evaluate(() => ({input: globalThis.mockInput, format: globalThis.mockFormat})) }));
+    throw error;
+  });
   assert.equal(await page.locator("#person-video").isHidden(), true);
   try { await page.locator("#result-video").waitFor({state: "visible"}); }
   catch (error) {
@@ -139,8 +143,11 @@ try {
     const { hasVisibleFrame } = await import("/src/media.ts");
     return { ready: video.readyState, playing: !video.paused, duration: video.duration, visiblePixels: hasVisibleFrame(video) };
   });
-  assert.ok(playback.ready >= 2 && playback.playing && playback.visiblePixels);
+  assert.ok(playback.ready >= 2 && playback.visiblePixels);
   assert.ok(Math.abs(playback.duration - 1.6) < 0.01);
+  assert.equal(await page.locator('#result-video').evaluate(video => video.loop), false);
+  const sustained = await page.locator('#result-video').evaluate(inspectPlayback);
+  assert.ok(Math.abs(sustained.elapsed - 1.6) < 0.5 && sustained.lastTime > 1.4, 'GUI must present the complete 1.6 second clip');
   await page.evaluate(() => { globalThis.mockBlankWarmup = 0; });
   assert.equal(await page.locator("#result-photo").isVisible(), false);
   assert.equal(await page.locator("#save-photo").isHidden(), true);
@@ -154,8 +161,8 @@ try {
   const studioProbe = spawnSync("ffprobe", ["-v", "error", "-show_entries", "stream=width,height:format=duration", "-of", "json", ".local/verification/test-only-studio.webm"], {encoding:"utf8"});
   const studio = JSON.parse(studioProbe.stdout);
   assert.ok(Math.abs(Number(studio.format.duration)-1.6) < 0.15);
-  assert.equal(studio.streams[0].width, 1408);
-  assert.equal(studio.streams[0].height, 1408);
+  assert.equal(studio.streams[0].width, 1080);
+  assert.equal(studio.streams[0].height, 1920);
   await page.locator("#compare").click();
   assert.equal(await page.locator("#person-video").isVisible(), true);
   await page.locator("#compare").click();
@@ -195,12 +202,8 @@ try {
       .querySelector("#source-description")
       .textContent.includes("8.0 秒"),
   );
-  assert.equal(await page.locator("#frames button").count(), 5);
-  await page.locator("#frames button").nth(3).click();
-  assert.equal(
-    await page.locator("#frames button").nth(3).getAttribute("aria-pressed"),
-    "true",
-  );
+  assert.equal(await page.locator("#frame-picker").count(), 0, 'video has no sampled image input');
+  assert.equal(await page.locator('#source-thumb-video').isVisible(), true);
   await page.locator("#coverage").selectOption("half");
   await page.locator("#source-done").click();
   await page.locator('[data-category="bottom"]').click();
@@ -216,7 +219,7 @@ try {
   );
   await page.waitForFunction(() => !document.querySelector("#start").disabled);
   assert.equal(await page.evaluate(() => globalThis.mockInput), "external");
-  assert.equal(await page.locator("#save-video").isVisible(), true);
+  assert.equal(await page.locator("#save-video").isVisible(), true, await page.locator('#status').textContent());
   const videoEvent = page.waitForEvent("download");
   await page.locator("#save-video").click();
   const download = await videoEvent;
@@ -245,6 +248,8 @@ try {
   const frameTimes = JSON.parse(timeline.stdout).frames.map((f) => Number(f.best_effort_timestamp_time));
   assert.ok(Math.max(...frameTimes) > 7.7 && Math.max(...frameTimes) < 8.15, "encoded frames must span the real eight-second timeline");
   assert.ok(frameTimes.every((t,i) => i === 0 || t >= frameTimes[i-1]));
+  const fullPlayback = await page.locator('#result-video').evaluate(inspectPlayback);
+  assert.ok(Math.abs(fullPlayback.elapsed - 8) < 1 && fullPlayback.lastTime > 7.7, 'GUI must play through all eight seconds');
   assert.equal(await page.locator("#shopping").isVisible(), true);
   assert.equal(
     await page.locator("#shopping-items a").getAttribute("href"),
@@ -270,12 +275,14 @@ try {
   await page.waitForFunction(() => !document.querySelector("#start").disabled);
   assert.equal(await page.locator("#result-photo").isVisible(), true);
   assert.equal(await page.locator("#save-video").isHidden(), true);
+  assert.equal(await page.evaluate(() => globalThis.mockInput), 'photo');
+  assert.equal(await page.evaluate(() => globalThis.mockImageFile.name), 'person.png', 'SDK must receive the original photo File');
   const photoEvent = page.waitForEvent("download");
   await page.locator("#save-photo").click();
   await (await photoEvent).saveAs(".local/verification/test-only-photo.jpg");
   assert.ok((await stat(".local/verification/test-only-photo.jpg")).size > 1000);
 
-  // Native camera exercise: recorded WebM, measured duration and frame extraction.
+  // Native camera exercise: recorded WebM, measured duration, no image extraction.
   await page.locator("#source-open").click();
   await page.locator("#record-source").click();
   await page.locator("#camera-panel").waitFor({ state: "visible" });
@@ -287,8 +294,11 @@ try {
       document.querySelector("#source-name").textContent.includes("我的录制"),
     null,
     { timeout: 15000 },
-  );
-  assert.equal(await page.locator("#frames button").count(), 5);
+  ).catch(async error => {
+    console.log(JSON.stringify({ cameraSource: await page.locator('#source-status').textContent(), status: await page.locator('#status').textContent(), errors }));
+    throw error;
+  });
+  assert.equal(await page.locator("#frame-picker").count(), 0);
   await page.locator("#source-done").click();
   await page.waitForFunction(() => document.querySelector("#camera-preview").srcObject === null);
   assert.equal(
@@ -399,7 +409,8 @@ try {
       "safe product import",
       "parse fallback and purchase link",
       "video duration limit",
-      "five-frame selection",
+      "original video previews without image extraction",
+      "standard 1080P output and full-duration continuous playback",
       "half-body lower garment validation",
       "pending-key cancellation",
       "native camera capture and cleanup",
