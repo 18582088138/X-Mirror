@@ -11,7 +11,7 @@ const cases = (
 ).split(",");
 if (
   cases.some(
-    (name) => !["top", "bottom", "hat", "combo", "video", "image", "man"].includes(name),
+    (name) => !["top", "bottom", "hat", "combo", "video", "image", "man", "top_hat"].includes(name),
   )
 )
   throw new Error("未知验证类别");
@@ -62,9 +62,9 @@ try {
       });
       if (await remove.count()) await remove.click();
     }
-    if (name === "hat" || name === "video" || name === "man") {
+    if (["hat", "video", "man", "top_hat"].includes(name)) {
       await page.locator("#source-open").click();
-      await page.locator(name === "man" ? '[data-model="man"]' : '[data-model="woman"]').click();
+      await page.locator(["man", "top_hat"].includes(name) ? '[data-model="man"]' : '[data-model="woman"]').click();
       await page.waitForFunction(() =>
         document
           .querySelector("#source-name")
@@ -97,13 +97,13 @@ try {
         .getByRole("button", { name: "试穿直筒原色牛仔裤", exact: true })
         .click();
     }
-    if (name === "hat" || name === "combo") {
+    if (["hat", "combo", "top_hat"].includes(name)) {
       await page.locator('[data-category="accessory"]').click();
       await page
         .getByRole("button", { name: "试穿白色棒球帽", exact: true })
         .click();
     }
-    if (name === "man") {
+    if (["man", "top_hat"].includes(name)) {
       await page.locator('[data-category="top"]').click();
       await page.locator("#garment-file").setInputFiles("public/demo/jacket.jpg");
       await page.waitForFunction(() => document.querySelector("#slots").textContent.includes("jacket"));
@@ -118,7 +118,8 @@ try {
     const frameDiagnostics = [];
     let previous = "";
     await page.locator("#start").click();
-    for (let i = 0; i < 60; i++) {
+    // Key issuance plus the bounded warmup/capture lease may exceed 60 seconds.
+    for (let i = 0; i < 100; i++) {
       await page.waitForTimeout(1000);
       const state = await page.locator("#status").textContent();
       frameDiagnostics.push(await page.evaluate(async () => {
@@ -182,7 +183,7 @@ try {
     }
     report.push(record);
     await writeFile(
-      ".local/verification/live/report.json",
+      cases.includes("top_hat") ? ".local/verification/live/report-combination.json" : ".local/verification/live/report.json",
       JSON.stringify({ cases: report, runtimeErrors: errors }, null, 2),
     );
     if (!success) break; // Never automatically repeat a failed paid call.

@@ -319,7 +319,7 @@ function renderSlots() {
   }
   const count = Object.values(slots).length;
   $("outfit-count").textContent = count
-    ? `已选 ${count} 件${count > 1 ? " · 组合试穿为实验功能" : ""}`
+    ? `已选 ${count} 件${count > 1 ? " · 一次生成，同时试穿" : ""}`
     : "选择心动的单品";
   controls();
 }
@@ -875,8 +875,8 @@ $("start").onclick = async () => {
     if (!valid()) return;
     ticket = next;
     hardTimer = setTimeout(
-      () => void end("生成等待超时，已停止连接。请检查网络后手动重试。"),
-      Math.max(5, next.sessionSeconds - 3) * 1000,
+      () => void end("本次试穿已达到等待上限，未能完成生成。已停止会话，请手动重试；服务启动或连接耗时可能较长。"),
+      Math.max(1, next.sessionSeconds - 1) * 1000,
     );
     session = new TryOnSession(
       $("remote"),

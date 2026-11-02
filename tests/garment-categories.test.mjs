@@ -41,3 +41,11 @@ test('suit and accessory prompts describe a complete outfit and the selected acc
   assert.ok([...prompt].length <= 1024);
   assert.throws(() => buildPrompt([garment('suit'), garment('top')], ''), /不能.*同时试穿/);
 });
+
+test('top and accessory combination asks for both items in every frame', () => {
+  const prompt = buildPrompt([garment('top'), garment('accessory', '帽子')], '第1列为上衣；第2列为配饰（帽子）');
+  assert.match(prompt, /同时穿戴全部已选服饰（上衣、配饰：帽子）/);
+  assert.match(prompt, /每个视频画面都保留这套组合，不能只替换其中一件/);
+  assert.match(prompt, /保留原有裤子或裙子/);
+  assert.ok([...prompt].length <= 1024);
+});

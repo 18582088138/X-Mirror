@@ -102,6 +102,7 @@ export class TryOnSession {
     prompt: string,
   ) {
     const launched = performance.now();
+    const deadline = launched + (ticket.sessionSeconds - 1) * 1000;
     const mode = source.isVideo ? "video" : "photo";
     this.targetSeconds = source.isVideo ? source.duration : 0;
     if (source.isVideo && ticket.outputSeconds + 0.001 < source.duration)
@@ -175,6 +176,12 @@ export class TryOnSession {
         return;
       }
       if (!this.startedFrames) {
+        // Do not start a full input clip when the bounded lease cannot contain it.
+        // Include encoder warmup and the maximum media transport offset.
+        if (performance.now() + ((source.isVideo ? source.duration : 1) + 3) * 1000 > deadline) {
+          this.onEnd(this.result, "服务启动耗时过长，剩余会话时间不足以生成完整结果。已停止，请手动重试。");
+          return;
+        }
         this.preparingRecording = true;
         this.result.startupMs = performance.now() - launched;
         if (mode === "video") {

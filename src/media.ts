@@ -278,7 +278,10 @@ export function buildPrompt(garments: Garment[], layout: string) {
     return `配饰：仅将参考图中的${g.accessory || "配饰"}佩戴到对应位置，不改变其他未选择的配饰`;
   }).join("；");
   const preserve = selected.has("accessory") ? "鞋袜及其他未选择的配饰" : "所有原有配饰及鞋袜";
-  return `将参考图中的服饰穿戴到原始人物画面中，视频跟随人物原有动作，照片保持原有姿势。${layout}。${instructions}。保持人物面容、身份、发型、体型、姿势、背景、${preserve}和其他未选择的衣物不变。准确保留商品颜色、版型、纹理、图案与细节，呈现自然的布料和光影。只处理所选类别；参考图中的其他服装、展示人物、背景、文字标签与展示道具不要出现在生成画面中。`;
+  const combination = garments.length > 1
+    ? `这是同一造型的 ${garments.length} 件单品组合：同时穿戴全部已选服饰（${garments.map(g => labels[g.category] + (g.accessory ? `：${g.accessory}` : "")).join("、")}），每个视频画面都保留这套组合，不能只替换其中一件。`
+    : "";
+  return `将参考图中的服饰穿戴到原始人物画面中，视频跟随人物原有动作，照片保持原有姿势。${layout}。${combination}${instructions}。保持人物面容、身份、发型、体型、姿势、背景、${preserve}和其他未选择的衣物不变。准确保留商品颜色、版型、纹理、图案与细节，呈现自然的布料和光影。只处理所选类别；参考图中的其他服装、展示人物、背景、文字标签与展示道具不要出现在生成画面中。`;
 }
 export async function normalizeRecording(
   blob: Blob,

@@ -222,14 +222,21 @@ export function createApi({
         await current.issuance;
         if (current.cancelled) throw new ApiError("会话已取消", 409);
         entry.status = "issued";
-        save();
-        const remainingSeconds = Math.max(
-          1,
-          Math.floor(
-            config.sessionSeconds -
-              (now().getTime() - new Date(entry.startedAt).getTime()) / 1000,
-          ),
+        // Issuance and model warmup are separate from capturing the whole input.
+        // Keep the existing warmup budget, reserve capture/transport time, and
+        // never run beyond the temporary key's conservative expiry deadline.
+        const issuanceSeconds = (now().getTime() - new Date(entry.startedAt).getTime()) / 1000;
+        const remainingSeconds = Math.max(1, Math.floor(Math.min(
+          config.sessionSeconds + Math.ceil(outputSeconds) + 3,
+          config.expiry - issuanceSeconds - 5,
+        )));
+        clearTimeout(current.timer);
+        current.timer = setTimeout(
+          () => void finish(owner, current.lease, "expired").catch(() => {}),
+          remainingSeconds * 1000,
         );
+        current.timer.unref?.();
+        save();
         return {
           lease: current.lease,
           temporaryApiKey: current.key,

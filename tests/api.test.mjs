@@ -126,7 +126,25 @@ test("validate source duration before reserving budget; retain a full ten-second
   assert.equal(calls.length, 0);
   const ticket = await api.start("visitor", randomUUID(), 10);
   assert.equal(ticket.outputSeconds, 10);
+  assert.equal(ticket.sessionSeconds, 73, 'warmup budget must reserve the complete ten-second capture and transport');
   await api.finish("visitor", ticket.lease);
+});
+
+test("issuance does not consume the model warmup budget, while key expiry still bounds the lease", async (t) => {
+  let clock = new Date('2026-11-02T00:00:00Z');
+  const { options } = setup(t, {}, async (_url, init) => {
+    if (init.method === 'POST') clock = new Date(clock.getTime() + 8000);
+  });
+  const api = createApi({ ...options, now: () => clock });
+  t.after(() => api.close());
+  const ticket = await api.start('visitor', randomUUID(), 8);
+  assert.equal(ticket.sessionSeconds, 71);
+  await api.finish('visitor', ticket.lease);
+  const capped = createApi({ ...options, env: { ...options.env, XMAX_KEY_EXPIRE_SECONDS: '60' }, now: () => clock });
+  t.after(() => capped.close());
+  const shortTicket = await capped.start('visitor', randomUUID(), 10);
+  assert.equal(shortTicket.sessionSeconds, 47, 'subtract issuance time and expiry margin');
+  await capped.finish('visitor', shortTicket.lease);
 });
 
 

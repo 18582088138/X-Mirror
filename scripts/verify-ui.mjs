@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile, mkdir, stat, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { inspectPlayback } from './playback-check.mjs';
+const skipCamera = process.argv.includes('--skip-camera');
 
 await mkdir(".local/verification", { recursive: true });
 const browser = await chromium.launch({
@@ -31,7 +32,8 @@ try {
     starts = 0,
     finishes = 0,
     delay = 0,
-    finishDelay = 0;
+    finishDelay = 0,
+    sessionSeconds = 30;
   const img = `data:image/jpeg;base64,${(await readFile("public/demo/sweatshirt.jpg")).toString("base64")}`;
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
@@ -42,7 +44,7 @@ try {
         active,
         remaining: null,
         outputSeconds: 3,
-        sessionSeconds: 30,
+        sessionSeconds,
         demoEnabled: true,
       };
     else if (path === "/api/catalog") {
@@ -57,7 +59,7 @@ try {
         temporaryApiKey: "tk-test-only",
         environment: "china",
         outputSeconds: route.request().postDataJSON().sourceSeconds,
-        sessionSeconds: 30,
+        sessionSeconds,
       };
     } else if (path === "/api/finish") {
       if (finishDelay) await new Promise((resolve) => setTimeout(resolve, finishDelay));
@@ -118,6 +120,8 @@ try {
   await page.setViewportSize({ width: 1280, height: 900 });
   assert.equal(await page.locator("#mode-photo").isDisabled(), true);
   await page.locator("#consent").check();
+  await page.locator('[data-category="top"]').click();
+  await page.getByRole('button', { name: '试穿条纹短款外套', exact: true }).click();
   await page.evaluate(() => { globalThis.mockBlankWarmup = 700; });
   finishDelay = 1500;
   await page.locator("#start").click();
@@ -147,7 +151,7 @@ try {
   assert.ok(Math.abs(playback.duration - 1.6) < 0.01);
   assert.equal(await page.locator('#result-video').evaluate(video => video.loop), false);
   const sustained = await page.locator('#result-video').evaluate(inspectPlayback);
-  assert.ok(Math.abs(sustained.elapsed - 1.6) < 0.5 && sustained.lastTime > 1.4, 'GUI must present the complete 1.6 second clip');
+  assert.ok(Math.abs(sustained.elapsed - 1.6) < 0.5 && sustained.lastTime > 1.4, `GUI must present the complete 1.6 second clip: ${JSON.stringify(sustained)}`);
   await page.evaluate(() => { globalThis.mockBlankWarmup = 0; });
   assert.equal(await page.locator("#result-photo").isVisible(), false);
   assert.equal(await page.locator("#save-photo").isHidden(), true);
@@ -212,6 +216,9 @@ try {
   assert.match(await page.locator("#status").textContent(), /腿部完整/);
   assert.equal(starts, 1);
   await page.getByRole("button", { name: "移除下装", exact: true }).click();
+  await page.locator('[data-category="accessory"]').click();
+  await page.getByRole('button', { name: '试穿白色棒球帽', exact: true }).click();
+  assert.match(await page.locator('#outfit-count').textContent(), /已选 2 件.*同时试穿/);
 
   await page.locator("#start").click();
   await page.waitForFunction(() =>
@@ -219,6 +226,7 @@ try {
   );
   await page.waitForFunction(() => !document.querySelector("#start").disabled);
   assert.equal(await page.evaluate(() => globalThis.mockInput), "external");
+  assert.match(await page.evaluate(() => globalThis.mockPrompt), /同时穿戴全部已选服饰（上衣、配饰：帽子）/);
   assert.equal(await page.locator("#save-video").isVisible(), true, await page.locator('#status').textContent());
   const videoEvent = page.waitForEvent("download");
   await page.locator("#save-video").click();
@@ -283,6 +291,7 @@ try {
   assert.ok((await stat(".local/verification/test-only-photo.jpg")).size > 1000);
 
   // Native camera exercise: recorded WebM, measured duration, no image extraction.
+  if (!skipCamera) {
   await page.locator("#source-open").click();
   await page.locator("#record-source").click();
   await page.locator("#camera-panel").waitFor({ state: "visible" });
@@ -307,6 +316,14 @@ try {
     ),
     null,
   );
+  } else {
+    // Some headless environments cannot start the fake-camera recorder.
+    // Continue video regressions with a real local file and report the skipped check.
+    await page.locator('#source-open').click();
+    await page.locator('#model-file').setInputFiles('public/demo/man.mp4');
+    await page.waitForFunction(() => document.querySelector('#source-name').textContent === 'man.mp4');
+    await page.locator('#source-done').click();
+  }
 
   // Unsupported recording must not quietly turn a video request into an image.
   const supported = await page.evaluate(() => {
@@ -361,6 +378,27 @@ try {
   assert.equal(await page.locator("#result-photo").isVisible(), true);
   await page.evaluate(() => { HTMLMediaElement.prototype.play = globalThis.originalPlay; });
 
+  // A lease that cannot contain the complete source must not save a truncated clip.
+  sessionSeconds = 7;
+  await page.locator('#start').click();
+  await page.waitForFunction(() => !document.querySelector('#start').disabled);
+  assert.match(await page.locator('#status').textContent(), /剩余会话时间不足/);
+  assert.equal(await page.locator('#result-actions').isHidden(), true);
+  assert.equal(await page.locator('#person-video').isVisible(), true);
+
+  // A stalled connection terminates once, without attributing it to user networking.
+  sessionSeconds = 2;
+  await page.evaluate(() => { globalThis.mockBlankRemote = true; });
+  const finishesBeforeTimeout = finishes;
+  await page.locator('#start').click();
+  await page.waitForFunction(() => !document.querySelector('#start').disabled);
+  assert.match(await page.locator('#status').textContent(), /达到等待上限/);
+  assert.doesNotMatch(await page.locator('#status').textContent(), /检查网络/);
+  assert.equal(finishes, finishesBeforeTimeout + 1);
+  assert.equal(await page.locator('#result-actions').isHidden(), true);
+  await page.evaluate(() => { globalThis.mockBlankRemote = false; });
+  sessionSeconds = 30;
+
   const long = ".local/verification/too-long.mp4";
   const made = spawnSync("ffmpeg", [
     "-y",
@@ -387,7 +425,7 @@ try {
   );
   await page.locator("#source-done").click();
   assert.deepEqual(errors, []);
-  assert.equal(starts, 8);
+  assert.equal(starts, 10);
   const report = {
     success: true,
     realApiCalls: 0,
@@ -412,9 +450,11 @@ try {
       "original video previews without image extraction",
       "standard 1080P output and full-duration continuous playback",
       "half-body lower garment validation",
+      "full capture time reserved before recording and stalled lease expires once",
       "pending-key cancellation",
-      "native camera capture and cleanup",
+      ...(!skipCamera ? ["native camera capture and cleanup"] : []),
     ],
+    skipped: skipCamera ? ['native camera capture: headless fake recorder unavailable'] : [],
     pageErrors: errors,
   };
   await writeFile(
