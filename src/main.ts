@@ -7,6 +7,7 @@ import {
   buildPrompt,
   normalizeRecording,
   loadImage,
+  waitMedia,
   labels,
   type Category,
   type Source,
@@ -726,18 +727,33 @@ function renderShopping() {
     $("shopping-items").append(anchor);
   });
 }
-function showResult() {
-  if (!result?.photo) return;
+async function showResult() {
+  if (!result?.photo) return false;
   showOriginal(comparing);
   $("remote").hidden = true;
   $<HTMLImageElement>("result-photo").src = result.photo;
-  $("result-photo").hidden = comparing || !!resultURL;
+  $("result-photo").hidden = comparing;
   const video = $<HTMLVideoElement>("result-video");
-  video.hidden = comparing || !resultURL;
-  if (resultURL) {
-    video.src = resultURL;
-    if (!comparing) void video.play().catch(() => {});
-    else video.pause();
+  video.hidden = true;
+  if (resultURL && !comparing) {
+    try {
+      if (video.getAttribute("src") !== resultURL) {
+        const loaded = waitMedia(video, "loadeddata");
+        video.src = resultURL;
+        await loaded;
+      }
+      await video.play();
+      video.hidden = false;
+      $("result-photo").hidden = true;
+    } catch {
+      $("stage-label").textContent = "短片播放失败";
+      status("短片无法播放，当前显示试穿封面。请刷新后重新试穿。", true);
+      return false;
+    }
+  } else video.pause();
+  if (result.video && !resultURL) {
+    $("stage-label").textContent = "短片保存失败";
+    return false;
   }
   $("stage-label").innerHTML = comparing
     ? `${icon("person")}原始画面`
@@ -751,6 +767,7 @@ function showResult() {
   $("save-photo").hidden = !!source?.isVideo;
   renderShopping();
   controls();
+  return true;
 }
 async function end(error?: string) {
   if (finishing || !busy) return;
@@ -769,11 +786,11 @@ async function end(error?: string) {
       } catch {}
     const current = session;
     session = undefined;
+    const saved = await current?.stop();
     const revoke = ticket
       ? api<{ revoked?: boolean }>("/api/finish", { lease: ticket.lease })
           .then((value) => value.revoked !== false, () => false)
       : Promise.resolve(true);
-    const saved = await current?.stop();
     error ||= saved?.failure;
     if (saved?.photo && (!source?.isVideo || saved.video)) result = saved;
     if (result?.video) resultURL = objectURL(result.video);
@@ -783,7 +800,10 @@ async function end(error?: string) {
     $("loading").hidden = true;
     if (result?.photo) {
       comparing = false;
-      showResult();
+      if (!(await showResult())) {
+        result.complete = false;
+        error ||= "生成短片无法播放，当前显示试穿封面，请重新试穿。";
+      }
     } else {
       $("remote").hidden = true;
       showOriginal(!!source);
@@ -871,6 +891,7 @@ $("start").onclick = async () => {
         $("loading").hidden = true;
         showOriginal(false);
         $("remote").hidden = false;
+        $("remote").style.opacity = "1";
         $("stage-label").innerHTML = `<i class="live-dot"></i>正在试穿`;
         $("stage-caption").textContent = lastOutfit
           .map((item) => item.name)
@@ -883,7 +904,10 @@ $("start").onclick = async () => {
         if (valid()) void end(error);
       },
     );
-    $("remote").hidden = true;
+    // Keep the RTC element rendered during warmup. display:none can suspend
+    // video decoding in embedded/mobile browsers and prevent the first frame.
+    $("remote").hidden = false;
+    $("remote").style.opacity = "0";
     await session.start(
       next,
       source,

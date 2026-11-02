@@ -82,7 +82,13 @@ export class XmaxClient {
         canvas.height = globalThis.mockFormat.height;
         const context = canvas.getContext("2d");
         let frame = 0;
+        const started = performance.now();
         const paint = () => {
+          if (globalThis.mockBlankRemote || performance.now() - started < (globalThis.mockBlankWarmup || 0)) {
+            context.fillStyle = "#fff";
+            context.fillRect(0, 0, canvas.width, canvas.height);
+            return;
+          }
           context.fillStyle = "#d4dacb";
           context.fillRect(0, 0, 360, 640);
           context.fillStyle = "#374936";

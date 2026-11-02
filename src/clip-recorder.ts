@@ -1,61 +1,71 @@
-import { Muxer, ArrayBufferTarget } from "webm-muxer";
-
-// Explicit timestamps keep encoder startup and RTC timestamp discontinuities out
-// of the clip timeline. Repeated pixels preserve a pause; they do not add motion.
+// Full-HD encoding stays off the main thread. All captured frames use one
+// clock with an explicit end, including when timers are delayed by browser load.
 export class ClipRecorder {
-  private target = new ArrayBufferTarget();
-  private muxer: Muxer<ArrayBufferTarget>;
-  private encoder: VideoEncoder;
-  private canvas = document.createElement("canvas");
-  private ctx: CanvasRenderingContext2D;
-  private started = performance.now();
+  private worker = new Worker(new URL("./clip-encoder.worker.ts", import.meta.url), { type: "module" });
+  private started = 0;
   private lastTimestamp = -1;
+  private pending = 0;
   private timer?: ReturnType<typeof setInterval>;
   private failure?: Error;
+  private done?: (buffer: ArrayBuffer) => void;
+  private reject?: (error: Error) => void;
+  private ready: Promise<void>;
+  private readonly durationUs: number;
+  private readonly step = 33333;
   static async supported(width: number, height: number) {
-    if (typeof VideoEncoder === "undefined") return false;
-    try {
-      return (await VideoEncoder.isConfigSupported({codec:"vp8", width, height})).supported;
-    } catch { return false; }
+    if (typeof VideoEncoder === "undefined" || typeof VideoFrame === "undefined") return false;
+    try { return !!(await VideoEncoder.isConfigSupported({ codec: "vp8", width, height })).supported; }
+    catch { return false; }
   }
-  constructor(private video: HTMLVideoElement, onError: () => void) {
-    const width = video.videoWidth, height = video.videoHeight;
-    this.canvas.width = width; this.canvas.height = height;
-    this.ctx = this.canvas.getContext("2d")!;
-    this.muxer = new Muxer({
-      target: this.target,
-      video: {codec:"V_VP8", width, height, frameRate:30},
-      firstTimestampBehavior:"strict",
+  constructor(private video: HTMLVideoElement, seconds: number, onError: () => void) {
+    this.durationUs = Math.round(seconds * 1_000_000);
+    this.ready = new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => this.fail(new Error("视频编码器启动超时")), 10000);
+      this.reject = reject;
+      this.worker.onmessage = ({ data }) => {
+        if (data.type === "ready") { clearTimeout(timeout); resolve(); }
+        if (data.type === "ack") this.pending--;
+        if (data.type === "done") this.done?.(data.buffer);
+        if (data.type === "error") { clearTimeout(timeout); this.fail(new Error(data.message)); onError(); }
+      };
+      this.worker.onerror = () => { clearTimeout(timeout); this.fail(new Error("视频编码失败")); onError(); };
+      const frame = new VideoFrame(video, { timestamp: 0, duration: this.step });
+      this.worker.postMessage({ type: "init", width: video.videoWidth, height: video.videoHeight, frame }, [frame]);
     });
-    this.encoder = new VideoEncoder({
-      output: (chunk, metadata) => this.muxer.addVideoChunk(chunk, metadata),
-      error: (error) => { this.failure = error; onError(); },
-    });
-    this.encoder.configure({codec:"vp8", width, height, bitrate:8_000_000,
-      framerate:30, latencyMode:"realtime"});
+  }
+  async prepare() { await this.ready; }
+  start(origin: number) {
+    this.started = origin;
     this.frame(0, true);
     this.timer = setInterval(() => {
-      if (this.encoder.state === "configured" && this.encoder.encodeQueueSize < 3)
-        this.frame(Math.round((performance.now() - this.started) * 1000));
-    }, 1000/30);
+      const timestamp = Math.round((performance.now() - this.started) * 1000);
+      if (timestamp < this.durationUs - this.step && this.pending < 3) this.frame(timestamp);
+      else if (timestamp >= this.durationUs - this.step) clearInterval(this.timer);
+    }, 1000 / 30);
   }
-  private frame(timestamp: number, keyFrame = false) {
-    timestamp = Math.max(this.lastTimestamp + 1, timestamp);
-    this.ctx.drawImage(this.video, 0, 0, this.canvas.width, this.canvas.height);
-    const frame = new VideoFrame(this.canvas, {timestamp, duration:33333});
-    try { this.encoder.encode(frame, {keyFrame}); this.lastTimestamp = timestamp; }
-    finally { frame.close(); }
+  private frame(timestamp: number, keyFrame = false, end = this.durationUs, terminal = false) {
+    timestamp = Math.max(0, Math.min(timestamp, terminal ? end : end - Math.min(this.step, end)));
+    if (timestamp <= this.lastTimestamp || this.failure) return;
+    const frame = new VideoFrame(this.video, { timestamp, duration: terminal ? 0 : Math.min(this.step, end - timestamp) });
+    this.lastTimestamp = timestamp;
+    this.pending++;
+    this.worker.postMessage({ type: "frame", frame, keyFrame }, [frame]);
   }
+  private fail(error: Error) { this.failure = error; clearInterval(this.timer); this.reject?.(error); }
   async finish(elapsedMs: number) {
     clearInterval(this.timer);
     try {
       if (this.failure) throw this.failure;
-      // Snapshot the final pixels before awaiting encoding: the result track may
-      // end while the backend revokes the session. Allow one final queued frame.
-      this.frame(Math.max(0, Math.round(elapsedMs*1000)-33333), true);
-      await this.encoder.flush();
-      this.muxer.finalize();
-      return new Blob([this.target.buffer], {type:"video/webm"});
-    } finally { if (this.encoder.state !== "closed") this.encoder.close(); }
+      const end = Math.min(this.durationUs, Math.max(this.step, Math.round(elapsedMs * 1000)));
+      // webm-muxer uses the final PTS for container Duration. A zero-duration
+      // endpoint at the clip boundary gives an exact duration without extra time.
+      this.frame(end, true, end, true);
+      return await new Promise<Blob>((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error("视频保存超时")), 10000);
+        this.reject = (error) => { clearTimeout(timeout); reject(error); };
+        this.done = (buffer) => { clearTimeout(timeout); resolve(new Blob([buffer], { type: "video/webm" })); };
+        this.worker.postMessage({ type: "finish" });
+      });
+    } finally { this.worker.terminate(); }
   }
 }

@@ -68,6 +68,49 @@ export function loadImage(src: string) {
     image.src = src;
   });
 }
+let frameSample: HTMLCanvasElement | undefined;
+// A decoded track may initially contain a solid white/black placeholder.
+// Check a tiny pixel sample before treating it as a generated picture.
+export function hasVisibleFrame(video: HTMLVideoElement) {
+  if (video.readyState < 2 || !video.videoWidth || !video.videoHeight) return false;
+  frameSample ??= document.createElement("canvas");
+  frameSample.width = 64; frameSample.height = 64;
+  try {
+    const ctx = frameSample.getContext("2d", { willReadFrequently: true })!;
+    ctx.drawImage(video, 0, 0, 64, 64);
+    const pixels = ctx.getImageData(0, 0, 64, 64).data;
+    let low = 255, high = 0, sum = 0, squared = 0;
+    for (let i = 0; i < pixels.length; i += 4) {
+      const value = (pixels[i] + pixels[i + 1] + pixels[i + 2]) / 3;
+      low = Math.min(low, value); high = Math.max(high, value);
+      sum += value; squared += value * value;
+    }
+    return high - low > 20 && squared / 4096 - (sum / 4096) ** 2 > 12;
+  } catch { return false; }
+}
+export async function validateOutputVideo(blob: Blob, expectedSeconds: number) {
+  const video = document.createElement("video");
+  const url = URL.createObjectURL(blob);
+  video.muted = true; video.playsInline = true; video.preload = "auto";
+  try {
+    const ready = waitMedia(video, "loadeddata");
+    video.src = url;
+    await ready;
+    if (!Number.isFinite(video.duration) || Math.abs(video.duration - expectedSeconds) > 0.15)
+      throw new Error("生成短片时长不正确，已阻止显示为完成，请重新试穿");
+    for (const time of [0, video.duration / 2, Math.max(0, video.duration - 0.1)]) {
+      if (Math.abs(video.currentTime - time) > 0.001) {
+        const seek = waitMedia(video, "seeked");
+        video.currentTime = time;
+        await seek;
+      }
+      if (!hasVisibleFrame(video)) throw new Error("生成短片包含空白画面，已阻止显示为完成，请重新试穿");
+    }
+    return { duration: video.duration, width: video.videoWidth, height: video.videoHeight };
+  } finally {
+    video.removeAttribute("src"); video.load(); URL.revokeObjectURL(url);
+  }
+}
 export function canvasBlob(canvas: HTMLCanvasElement, quality = 0.9) {
   return new Promise<Blob>((resolve, reject) =>
     canvas.toBlob(

@@ -117,6 +117,7 @@ try {
   await page.setViewportSize({ width: 1280, height: 900 });
   assert.equal(await page.locator("#mode-photo").isDisabled(), true);
   await page.locator("#consent").check();
+  await page.evaluate(() => { globalThis.mockBlankWarmup = 700; });
   finishDelay = 1500;
   await page.locator("#start").click();
   try { await page.locator('#remote video[data-origin="xmax-remote"]').waitFor({state: "visible"}); }
@@ -124,6 +125,7 @@ try {
     console.log(JSON.stringify({ status: await page.locator("#status").textContent(), errors }));
     throw error;
   }
+  await page.waitForFunction(() => document.querySelector("#stage-label").textContent.includes("正在试穿"));
   assert.equal(await page.locator("#person-video").isHidden(), true);
   try { await page.locator("#result-video").waitFor({state: "visible"}); }
   catch (error) {
@@ -133,6 +135,13 @@ try {
   assert.equal(await page.locator("#start").isDisabled(), true);
   await page.waitForFunction(() => !document.querySelector("#start").disabled);
   assert.equal(await page.locator("#result-video").isVisible(), true);
+  const playback = await page.locator("#result-video").evaluate(async (video) => {
+    const { hasVisibleFrame } = await import("/src/media.ts");
+    return { ready: video.readyState, playing: !video.paused, duration: video.duration, visiblePixels: hasVisibleFrame(video) };
+  });
+  assert.ok(playback.ready >= 2 && playback.playing && playback.visiblePixels);
+  assert.ok(Math.abs(playback.duration - 1.6) < 0.01);
+  await page.evaluate(() => { globalThis.mockBlankWarmup = 0; });
   assert.equal(await page.locator("#result-photo").isVisible(), false);
   assert.equal(await page.locator("#save-photo").isHidden(), true);
   assert.equal(finishes, 1);
@@ -230,8 +239,7 @@ try {
   const metadata = JSON.parse(probe.stdout);
   assert.ok(Number(metadata.streams[0].nb_read_frames) > 20);
   assert.ok(
-    Number(metadata.format.duration) > 7.85 &&
-      Number(metadata.format.duration) < 8.15,
+    Math.abs(Number(metadata.format.duration) - 8) < 0.01,
   );
   const timeline = spawnSync("ffprobe", ["-v", "error", "-show_entries", "frame=best_effort_timestamp_time", "-of", "json", ".local/verification/test-only-video.webm"], {encoding:"utf8"});
   const frameTimes = JSON.parse(timeline.stdout).frames.map((f) => Number(f.best_effort_timestamp_time));
@@ -282,6 +290,7 @@ try {
   );
   assert.equal(await page.locator("#frames button").count(), 5);
   await page.locator("#source-done").click();
+  await page.waitForFunction(() => document.querySelector("#camera-preview").srcObject === null);
   assert.equal(
     await page.evaluate(
       () => document.querySelector("#camera-preview").srcObject,
@@ -317,6 +326,31 @@ try {
   assert.equal(await page.locator("#person-video").isVisible(), true);
   await page.evaluate(() => { globalThis.mockNoRemote = false; });
 
+  // Solid remote placeholders must not become a successful clip or cover.
+  await page.evaluate(() => { globalThis.mockBlankRemote = true; });
+  await page.locator("#start").click();
+  await page.waitForTimeout(500);
+  assert.equal(await page.locator("#stage-label").textContent(), "人物预览");
+  await page.locator("#stop").click();
+  await page.waitForFunction(() => !document.querySelector("#start").disabled);
+  assert.equal(await page.locator("#person-video").isVisible(), true);
+  assert.equal(await page.locator("#result-actions").isHidden(), true);
+  await page.evaluate(() => { globalThis.mockBlankRemote = false; });
+
+  // Player rejection must remain a failure after end() updates status.
+  await page.evaluate(() => {
+    globalThis.originalPlay = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function () {
+      return this.id === "result-video" ? Promise.reject(new Error("test playback rejection")) : globalThis.originalPlay.call(this);
+    };
+  });
+  await page.locator("#start").click();
+  await page.waitForFunction(() => !document.querySelector("#start").disabled);
+  assert.match(await page.locator("#status").textContent(), /无法播放/);
+  assert.equal(await page.locator("#stage-label").textContent(), "短片播放失败");
+  assert.equal(await page.locator("#result-photo").isVisible(), true);
+  await page.evaluate(() => { HTMLMediaElement.prototype.play = globalThis.originalPlay; });
+
   const long = ".local/verification/too-long.mp4";
   const made = spawnSync("ffmpeg", [
     "-y",
@@ -343,7 +377,7 @@ try {
   );
   await page.locator("#source-done").click();
   assert.deepEqual(errors, []);
-  assert.equal(starts, 6);
+  assert.equal(starts, 8);
   const report = {
     success: true,
     realApiCalls: 0,

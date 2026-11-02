@@ -55,7 +55,7 @@ npm run prepare:demo
 
 ## API 与费用控制
 
-使用官方 `@xmaxai/web-sdk` 的 `RealtimeModel.x2_1`，通过 `createExternalVideoStream` 传入高清 Canvas 轨道：照片绘制静态完整图像，视频播放原始动作、保留完整内容并补边，不循环输入。服饰图通过 SDK 的存储服务上传，然后使用 `RealtimeContext` 开始生成。预览只使用 `setRemoteMediaTracksListener` 提供的原始远端视频轨道，录制对该远端画面按浏览器时钟重采样；支持 WebCodecs 的浏览器使用显式帧时间戳编码，其他浏览器使用 MediaRecorder 兼容路径，SDK 视图留在屏幕外完成启动统计。没有远端结果时保持原始素材预览；停止后明确标记“原始素材 · 未生成结果”。浏览器只收到受限临时密钥。
+使用官方 `@xmaxai/web-sdk` 的 `RealtimeModel.x2_1`，通过 `createExternalVideoStream` 传入高清 Canvas 轨道：照片绘制静态完整图像，视频播放原始动作、保留完整内容并补边，不循环输入。视频加载后先等待首帧完成解码与绘制，再发布输入画布。服饰图通过 SDK 的存储服务上传，然后使用 `RealtimeContext` 开始生成。预览只使用 `setRemoteMediaTracksListener` 提供的原始远端视频轨道；支持 WebCodecs 时将解码画面交给 Worker 编码，编码器先预热，随后按统一时钟录制，帧时间戳不能超过原片长度；其他浏览器使用 MediaRecorder 兼容路径。远端就绪还须通过空白画面检查，保存后验证解码、首中尾画面与实际时长，页面确认播放成功后才标记完成。没有有效结果时保留原始素材并明确标记未生成。浏览器只收到受限临时密钥。
 
 后端通过官方接口 `POST /temporary-api-key` 签发密钥，通过 `PUT /temporary-api-key/:key/inactive` 撤销。国内接口基址为 `https://cloud.xmax.22duck.cn/open/api/v1`，海外为 `https://api.xmax.ai/open/api/v1`。
 

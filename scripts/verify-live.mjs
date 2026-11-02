@@ -19,7 +19,7 @@ const browser = await chromium.launch({
   executablePath:
     process.env.CHROME_PATH ||
     "C:/Program Files/Google/Chrome/Application/chrome.exe",
-  headless: true,
+  headless: !process.argv.includes("--headed"),
   args: ["--autoplay-policy=no-user-gesture-required"],
   ...(env.XMAX_PROXY_URL
     ? { proxy: { server: env.XMAX_PROXY_URL, bypass: "127.0.0.1,localhost" } }
@@ -48,7 +48,7 @@ try {
   );
   const errors = [];
   page.on("pageerror", () => errors.push("browser runtime error"));
-  await page.goto("http://127.0.0.1:5180", { waitUntil: "domcontentloaded" });
+  await page.goto(process.env.TEST_BASE_URL || "http://127.0.0.1:5180", { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() =>
     document.querySelector("#source-name")?.textContent.includes("Studio"),
   );
@@ -114,11 +114,16 @@ try {
       "API 未就绪或额度不足",
     );
     const states = [];
+    const frameDiagnostics = [];
     let previous = "";
     await page.locator("#start").click();
     for (let i = 0; i < 60; i++) {
       await page.waitForTimeout(1000);
       const state = await page.locator("#status").textContent();
+      frameDiagnostics.push(await page.evaluate(async () => {
+        const { hasVisibleFrame } = await import("/src/media.ts");
+        return Array.from(document.querySelectorAll("video"), video => ({ id: video.id, origin: video.dataset.origin, width: video.videoWidth, height: video.videoHeight, time: video.currentTime, visiblePixels: hasVisibleFrame(video) }));
+      }));
       if (state !== previous) {
         previous = state;
         states.push(state);
@@ -141,12 +146,23 @@ try {
       at: new Date().toISOString(),
       success,
       states,
+      frameDiagnostics,
       connections: [...connections],
       metrics: [...metrics],
       outputFile: undefined,
       bytes: 0,
     };
     if (success) {
+      if (name !== "image") {
+        const playback = await page.locator("#result-video").evaluate(async (video) => {
+          const { hasVisibleFrame } = await import("/src/media.ts");
+          return { ready: video.readyState, playing: !video.paused, duration: video.duration, width: video.videoWidth, height: video.videoHeight, visiblePixels: hasVisibleFrame(video) };
+        });
+        assert.ok(playback.ready >= 2 && playback.playing && playback.visiblePixels, "real result must be decoded, visible and playing");
+        const expected = metrics.at(-1).sourceDuration;
+        assert.ok(Math.abs(playback.duration - expected) < 0.01, "browser output duration must match input");
+        record.playback = playback;
+      }
       const event = page.waitForEvent("download");
       await page.locator(name === "image" ? "#save-photo" : "#save-video").click();
       const file = await event;
@@ -167,7 +183,7 @@ try {
     if (!success) break; // Never automatically repeat a failed paid call.
   }
   console.log(
-    JSON.stringify({ cases: report, runtimeErrors: errors }, null, 2),
+    JSON.stringify({ cases: report.map(({ frameDiagnostics, ...item }) => item), runtimeErrors: errors }, null, 2),
   );
   if (report.some((item) => !item.success) || errors.length)
     process.exitCode = 1;

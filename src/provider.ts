@@ -15,7 +15,7 @@ import {
   type RemoteMediaTracks,
   type XmaxRealtimeManaging,
 } from "@xmaxai/web-sdk";
-import { loadImage, waitMedia, normalizeRecording, type Source } from "./media";
+import { loadImage, waitMedia, normalizeRecording, hasVisibleFrame, validateOutputVideo, type Source } from "./media";
 
 export type Ticket = {
   lease: string;
@@ -61,6 +61,9 @@ export class TryOnSession {
   private closing?: Promise<Result>;
   private result: Result = { width: 0, height: 0 };
   private startedFrames = false;
+  private preparingRecording = false;
+  private generating = false;
+  private visibleFrames = 0;
   private recordedAt = 0;
   private inputVideo?: HTMLVideoElement;
   private inputStream?: MediaStream;
@@ -129,8 +132,10 @@ export class TryOnSession {
       );
       if (state.reason?.kind === "failure")
         this.onEnd(this.result, "模型连接失败，请检查网络或余额后手动重试");
-      if (state.connectionState === RealtimeConnectionState.generating)
+      if (state.connectionState === RealtimeConnectionState.generating) {
+        this.generating = true;
         this.onStatus("正在接收试穿画面…");
+      }
     });
     if (this.stopped) return;
     await realtime.setTimingListener((timing) => {
@@ -160,22 +165,36 @@ export class TryOnSession {
     // Hold the original first frame through connection warmup. Never loop the source.
     this.frameTimer = setInterval(async () => {
       const video = this.remoteVideo;
-      if (this.stopped || !this.rawTrack || this.rawTrack.readyState !== "live" || video.readyState < 2 || !video.videoWidth) return;
+      if (this.stopped || this.preparingRecording || !this.generating || !this.rawTrack || this.rawTrack.readyState !== "live") return;
+      if (!hasVisibleFrame(video)) { this.visibleFrames = 0; return; }
+      if (++this.visibleFrames < 3) return;
       this.result.width = video.videoWidth;
       this.result.height = video.videoHeight;
       if (!this.startedFrames) {
-        this.startedFrames = true;
+        this.preparingRecording = true;
         this.result.startupMs = performance.now() - launched;
         if (mode === "video") {
-          try { await this.record(video); }
+          try {
+            await this.record(video);
+            if (this.stopped) return;
+            await this.inputVideo?.play();
+            // The input starts first; let its first moving frames reach the
+            // receiver before starting the fixed-length output timeline.
+            const delay = Math.min(1500, Math.max(0, this.result.transport?.endToEndDelayMs ?? 250));
+            await new Promise((resolve) => setTimeout(resolve, delay));
+          }
           catch (error) {
-            this.onEnd(this.result, error instanceof Error ? error.message : "视频录制失败");
+            this.onEnd(this.result, error instanceof Error ? error.message : "人物视频播放或录制失败");
             return;
           }
           if (this.stopped) return;
-          void this.inputVideo?.play().catch(() =>
-            this.onEnd(this.result, "人物视频播放失败，请使用 H.264 MP4 后重试"));
         }
+        if (!hasVisibleFrame(video)) { this.onEnd(this.result, "远端试穿画面为空，请重新生成"); return; }
+        this.recordedAt = performance.now();
+        this.clipRecorder?.start(this.recordedAt);
+        if (this.recorder) this.recorder.start(300);
+        this.startedFrames = true;
+        this.preparingRecording = false;
         this.onReady();
         this.timer = setTimeout(() => {
           this.result.complete = true;
@@ -222,9 +241,16 @@ export class TryOnSession {
       video.muted = true;
       video.playsInline = true;
       video.loop = false;
+      this.localContainer.append(video);
       const ready = waitMedia(video, "loadeddata");
       video.src = source.url;
       await ready;
+      // Metadata/loadeddata alone can leave a paused video with blank pixels.
+      // Seek into its first frame before drawing/publishing the HD canvas.
+      const sought = waitMedia(video, "seeked");
+      video.currentTime = Math.min(0.01, source.duration / 2);
+      await sought;
+      if (!hasVisibleFrame(video)) throw new Error("人物视频首帧为空，请更换视频或重新上传");
       media = video;
     } else media = await loadImage(source.url);
     if (this.stopped) throw new Error("会话已停止");
@@ -256,9 +282,9 @@ export class TryOnSession {
   private async record(video: HTMLVideoElement) {
     if (await ClipRecorder.supported(video.videoWidth, video.videoHeight)) {
       if (this.stopped) return;
-      this.clipRecorder = new ClipRecorder(video, () =>
+      this.clipRecorder = new ClipRecorder(video, this.targetSeconds, () =>
         this.onEnd(this.result, "视频编码失败，请换用新版浏览器重试"));
-      this.recordedAt = performance.now();
+      await this.clipRecorder.prepare();
       return;
     }
     if (!("MediaRecorder" in window)) throw new Error("浏览器不支持视频保存，请使用新版 Chrome、Edge 或 Safari");
@@ -294,9 +320,6 @@ export class TryOnSession {
         this.result.complete = false;
         this.onEnd(this.result, "视频录制中断，未生成完整短片");
       };
-      this.recorder.start(300);
-      this.recordedAt = performance.now();
-      paint();
     } catch {
       clearInterval(this.recordTimer);
       this.recordTrack?.stop();
@@ -313,15 +336,19 @@ export class TryOnSession {
     this.inputVideo?.pause();
     this.closing = (async () => {
       if (this.clipRecorder) {
-        const elapsed = performance.now() - this.recordedAt;
+        const elapsed = this.startedFrames ? Math.min(this.targetSeconds * 1000, performance.now() - this.recordedAt) : 0;
         this.result.duration = elapsed / 1000;
         if (elapsed < this.targetSeconds * 1000 - 100) this.result.complete = false;
-        try { this.result.video = await this.clipRecorder.finish(elapsed); }
+        try {
+          const blob = await this.clipRecorder.finish(elapsed);
+          Object.assign(this.result, await validateOutputVideo(blob, elapsed / 1000));
+          this.result.video = blob;
+        }
         catch { this.result.failure = "视频保存失败，未生成可播放的完整短片"; this.result.complete = false; }
       }
       if (this.recorder && this.recorder.state !== "inactive") {
         const recorder = this.recorder;
-        const elapsed = performance.now() - this.recordedAt;
+        const elapsed = Math.min(this.targetSeconds * 1000, performance.now() - this.recordedAt);
         this.result.duration = elapsed / 1000;
         if (elapsed < this.targetSeconds * 1000 - 100) this.result.complete = false;
         await new Promise<void>((resolve) => {
@@ -336,11 +363,16 @@ export class TryOnSession {
           );
           recorder.stop();
         });
-        if (this.chunks.length)
-          this.result.video = await normalizeRecording(
+        if (this.chunks.length) {
+          const blob = await normalizeRecording(
             new Blob(this.chunks, { type: recorder.mimeType }),
             elapsed,
           );
+          try {
+            Object.assign(this.result, await validateOutputVideo(blob, elapsed / 1000));
+            this.result.video = blob;
+          } catch { this.result.failure = "视频保存失败，未生成时长正确且可播放的短片"; this.result.complete = false; }
+        }
       }
       this.recordTrack?.stop();
       this.remoteVideo.pause();
