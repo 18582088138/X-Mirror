@@ -1,7 +1,7 @@
 import { XmaxClient, XmaxConfiguration, XmaxEnvironment } from '@xmaxai/web-sdk';
 import './style.css';
 
-type Preset = { id: string; name: string; category: string; image: string; prompt: string; referenceUrl?: string | null; custom?: boolean };
+type Preset = { id: string; name: string; category: string; image: string; prompt: string; referenceUrl?: string | null; custom?: boolean; edited?: boolean };
 type Clip = { id: string; seconds: number; inputUrl: string; directory: string; createdAt: string };
 type Run = { id: string; clipId: string; presetId: string; presetName: string; prompt: string; status: string; videoUrl?: string; previewUrl?: string; directory: string; duration?: number; error?: string };
 type Ticket = { lease: string; temporaryApiKey: string; environment: 'china' | 'global'; sessionSeconds: number };
@@ -15,7 +15,7 @@ $('app').innerHTML = `
 <article class="video-card"><div class="card-heading"><h2>生成视频</h2><span id="output-badge" class="badge">等待素材</span></div><div class="video-box"><video id="output-video" controls playsinline loop hidden></video><div id="output-empty" class="empty"><div class="empty-icon">✦</div><strong>点击右侧素材试试</strong><span>人脸、帽子、服装、背景，都准备好了</span></div><div id="working" class="working" hidden><span class="spinner"></span><b id="working-text">连接 XMAX…</b></div></div><div class="video-footer"><span id="output-info">生成后自动保存至本地</span><a id="output-download" hidden download>下载结果 ↓</a></div></article></section>
 <section class="prompt-card"><div class="prompt-heading"><div><span class="eyebrow">当前效果</span><h2 id="effect-name">选择素材</h2></div><div class="prompt-actions"><button id="generate" class="button primary" disabled>生成当前效果</button><button id="cancel" class="button secondary" disabled>停止处理</button></div></div><textarea id="prompt" rows="2" aria-label="提示词" maxlength="1024"></textarea><p id="status" role="status">打开摄像头开始录制，录制和浏览素材不会消耗生成额度。</p></section>
 <section class="history-section"><div class="history-heading"><h2>最近保存</h2><button id="folder" class="text-button">打开本地保存目录 ↗</button></div><div id="history" class="history"><span class="history-empty">生成的短片会出现在这里，刷新页面也会保留。</span></div><p class="save-path" id="save-path"></p></section></main>
-<aside class="material-dock" aria-label="预置素材悬浮窗"><div class="dock-heading"><div><span class="eyebrow">准备好的素材</span><h2>换个效果</h2></div><span id="material-count"></span></div><p class="dock-hint">录制或上传后，点击素材直接生成</p><button id="add-material" class="add-material">＋ 添加素材</button><div id="filters" class="filters"></div><div id="materials" class="materials"></div><div class="dock-footer">图片与提示词已配对<br>同一段视频可以反复尝试</div></aside>
+<aside class="material-dock" aria-label="预置素材悬浮窗"><div class="dock-heading"><div><span class="eyebrow">准备好的素材</span><h2>换个效果</h2></div><span id="material-count"></span></div><p class="dock-hint">录制或上传后，点击素材编辑图片和提示词，再点「使用生成」</p><button id="add-material" class="add-material">＋ 添加素材</button><div id="filters" class="filters"></div><div id="materials" class="materials"></div><div class="dock-footer">图片与提示词已配对<br>同一段视频可以反复尝试</div></aside>
 <dialog id="material-dialog" class="form-dialog"><form id="material-form" method="dialog"><button type="button" id="material-close" class="preview-close" aria-label="关闭">×</button><h3>添加自定义素材</h3>
 <label class="field">素材图片（PNG / JPEG / WebP，≤10 MB）<input id="material-image" type="file" accept="image/png,image/jpeg,image/webp" required></label><img id="material-preview" alt="素材预览" hidden>
 <label class="field">名称<input id="material-name" maxlength="30" placeholder="例如：我的帽子" required></label>
@@ -23,7 +23,12 @@ $('app').innerHTML = `
 <div class="field">快捷提示词<div id="material-templates" class="templates"></div></div>
 <label class="field">提示词<textarea id="material-prompt" rows="4" maxlength="1024" placeholder="描述如何使用参考图，例如：将视频中人物的脸换成参考图中的脸，其他保持不变" required></textarea></label>
 <p id="material-error" class="form-error" role="alert"></p><div class="form-actions"><button type="button" id="material-cancel" class="button secondary">取消</button><button id="material-save" class="button primary">保存素材</button></div></form></dialog>
-<dialog id="preview-dialog"><button id="preview-close" class="preview-close" aria-label="关闭预览">×</button><img id="preview-image" alt="素材大图"><p id="preview-name"></p></dialog>`;
+<dialog id="edit-dialog" class="form-dialog"><form id="edit-form" method="dialog"><button type="button" id="edit-close" class="preview-close" aria-label="关闭">×</button><h3>编辑素材</h3>
+<div class="edit-image"><img id="edit-image" alt="素材大图"><label class="button secondary edit-replace">更换图片<input id="edit-file" type="file" accept="image/png,image/jpeg,image/webp" hidden></label></div>
+<label class="field">名称<input id="edit-name" maxlength="30" required></label>
+<label class="field">提示词<textarea id="edit-prompt" rows="5" maxlength="1024" required></textarea></label>
+<p id="edit-error" class="form-error" role="alert"></p><div class="form-actions"><button type="button" id="edit-reset" class="button secondary" hidden>恢复默认</button><button type="button" id="edit-save" class="button secondary">保存修改</button></div>
+<button type="button" id="edit-use" class="button primary edit-use">使用生成</button></form></dialog>`;
 
 let presets: Preset[] = [], selected: Preset | undefined, clip: Clip | undefined, cameraStream: MediaStream | undefined;
 let capturing = false, opening = false, configured = false, savingCapture = false;
@@ -52,7 +57,7 @@ function controls() {
   $<HTMLTextAreaElement>('prompt').disabled = locked;
   $<HTMLButtonElement>('generate').disabled = locked || !clip || !selected || !configured;
   $<HTMLButtonElement>('cancel').disabled = !currentJob || currentJob.done;
-  for (const button of document.querySelectorAll<HTMLButtonElement>('.material-use')) button.disabled = locked;
+  $<HTMLButtonElement>('edit-use').disabled = locked || !configured;
 }
 function select(preset: Preset) {
   selected = preset; $('effect-name').textContent = preset.name; $<HTMLTextAreaElement>('prompt').value = preset.prompt;
@@ -63,14 +68,12 @@ function renderMaterials() {
   $('materials').replaceChildren();
   for (const preset of presets.filter(p => filter === '全部' || p.category === filter)) {
     const card = document.createElement('div'); card.className = 'material-card'; card.dataset.id = preset.id;
-    const use = document.createElement('button'); use.className = 'material-use'; use.title = `${preset.name}：录制后点击生成`;
+    const open = document.createElement('button'); open.className = 'material-open'; open.title = `${preset.name}：点击编辑素材和提示词`;
     const image = document.createElement('img'); image.src = preset.image; image.alt = preset.name; image.loading = 'lazy';
     const label = document.createElement('div'); label.className = 'material-label'; const name = document.createElement('strong'); name.textContent = preset.name;
-    const hint = document.createElement('span'); hint.textContent = '点击使用 →'; label.append(name, hint); use.append(image, label);
-    use.onclick = () => { if (capturing || savingCapture || processing()) return; select(preset); if (clip) void generate(); else status(`已选择「${preset.name}」，请先录制一段视频。`); };
-    const preview = document.createElement('button'); preview.className = 'material-preview'; preview.textContent = '↗'; preview.title = '查看素材大图'; preview.setAttribute('aria-label', `预览${preset.name}`);
-    preview.onclick = () => { $<HTMLImageElement>('preview-image').src = preset.image; $('preview-name').textContent = preset.name; $<HTMLDialogElement>('preview-dialog').showModal(); };
-    card.append(use, preview);
+    const hint = document.createElement('span'); hint.textContent = preset.edited ? '已修改 · 点击编辑 →' : '点击编辑 →'; label.append(name, hint); open.append(image, label);
+    open.onclick = () => openEditor(preset);
+    card.append(open);
     if (preset.custom) {
       const remove = document.createElement('button'); remove.className = 'material-remove'; remove.textContent = '×'; remove.title = '删除这个自定义素材'; remove.setAttribute('aria-label', `删除${preset.name}`);
       remove.onclick = () => void removeMaterial(preset); card.append(remove);
@@ -173,7 +176,7 @@ async function record() {
     });
     capturing = false; savingCapture = true; controls(); status('正在保存原视频到本地…');
     const saved = await upload<Clip>(`/api/clips?seconds=${duration}`, blob); showClip(saved);
-    status(`已录制并保存 ${duration} 秒原片。点击右侧素材即可生成。`);
+    status(`已录制并保存 ${duration} 秒原片。点击右侧素材，编辑后点「使用生成」。`);
   } catch (error) { status(`录制或保存失败：${String(error)}`); }
   finally { capturing = false; savingCapture = false; $('countdown').hidden = true; controls(); }
 }
@@ -202,7 +205,7 @@ async function importClip(file: File) {
     status('正在保存上传的视频到本地…');
     const saved = await upload<Clip>(`/api/clips?seconds=${duration}`, new Blob([file], { type }));
     showClip(saved);
-    status(length > 10.5 ? '视频超过 10 秒，已保留前 10 秒并保存。点击右侧素材即可生成。' : `已保存上传的 ${duration} 秒视频。点击右侧素材即可生成。`);
+    status(length > 10.5 ? '视频超过 10 秒，已保留前 10 秒并保存。点击右侧素材，编辑后点「使用生成」。' : `已保存上传的 ${duration} 秒视频。点击右侧素材，编辑后点「使用生成」。`);
   } catch (error) { status(`上传失败：${error instanceof Error ? error.message : String(error)}`); }
   finally { savingCapture = false; controls(); }
 }
@@ -347,7 +350,56 @@ $<HTMLFormElement>('material-form').onsubmit = async event => {
   } catch (failure) { error.textContent = failure instanceof Error ? failure.message : String(failure); }
   finally { save.disabled = false; }
 };
-$('preview-close').onclick = () => $<HTMLDialogElement>('preview-dialog').close();
+const editDialog = $<HTMLDialogElement>('edit-dialog');
+let editing: Preset | undefined, editFile: File | undefined;
+function openEditor(preset: Preset) {
+  editing = preset; editFile = undefined; $<HTMLInputElement>('edit-file').value = '';
+  $<HTMLImageElement>('edit-image').src = preset.image; $<HTMLInputElement>('edit-name').value = preset.name; $<HTMLTextAreaElement>('edit-prompt').value = preset.prompt;
+  $('edit-error').textContent = ''; $('edit-reset').hidden = !preset.edited; controls(); editDialog.showModal();
+}
+function closeEditor() {
+  const image = $<HTMLImageElement>('edit-image'); if (image.src.startsWith('blob:')) URL.revokeObjectURL(image.src);
+  editing = undefined; editFile = undefined; editDialog.close();
+}
+$('edit-close').onclick = closeEditor;
+$('edit-file').onchange = () => {
+  const file = $<HTMLInputElement>('edit-file').files?.[0], image = $<HTMLImageElement>('edit-image'), error = $('edit-error');
+  if (!file) return;
+  if (file.size > 10 * 1024 * 1024) { error.textContent = '图片超过 10 MB'; return; }
+  error.textContent = ''; if (image.src.startsWith('blob:')) URL.revokeObjectURL(image.src);
+  editFile = file; image.src = URL.createObjectURL(file);
+};
+function replacePreset(updated: Preset) {
+  presets = presets.map(p => p.id === updated.id ? updated : p);
+  if (selected?.id === updated.id) { selected = updated; $('effect-name').textContent = updated.name; }
+  renderMaterials();
+}
+// 保存名称、提示词和（可选的）新图片；没有改动时不发请求。
+async function saveEdit(): Promise<Preset | undefined> {
+  const preset = editing; if (!preset) return;
+  const name = $<HTMLInputElement>('edit-name').value.trim(), prompt = $<HTMLTextAreaElement>('edit-prompt').value.trim(), error = $('edit-error');
+  if (!name || !prompt) { error.textContent = '名称和提示词不能为空'; return; }
+  if (name === preset.name && prompt === preset.prompt && !editFile) return preset;
+  try {
+    const updated = await upload<Preset>(`/api/materials/${preset.id}/update?${new URLSearchParams({ name, prompt })}`, editFile ?? new Blob([], { type: 'application/octet-stream' }));
+    replacePreset(updated); return updated;
+  } catch (failure) { error.textContent = failure instanceof Error ? failure.message : String(failure); }
+}
+$('edit-save').onclick = async () => {
+  const updated = await saveEdit(); if (!updated) return;
+  closeEditor(); status(`已保存素材「${updated.name}」。`);
+};
+$('edit-reset').onclick = async () => {
+  const preset = editing; if (!preset || !confirm(`将「${preset.name}」恢复为默认的图片和提示词？`)) return;
+  try { const restored = await upload<Preset>(`/api/materials/${preset.id}/reset`, new Blob([], { type: 'application/octet-stream' })); replacePreset(restored); closeEditor(); status(`已恢复「${restored.name}」的默认设置。`); }
+  catch (failure) { $('edit-error').textContent = failure instanceof Error ? failure.message : String(failure); }
+};
+$('edit-use').onclick = async () => {
+  if (capturing || savingCapture || processing()) return;
+  if (!clip) { $('edit-error').textContent = '请先录制或上传一段视频，再点击「使用生成」'; return; }
+  const updated = await saveEdit(); if (!updated) return;
+  closeEditor(); select(updated); void generate();
+};
 window.addEventListener('pagehide', () => {
   cameraStream?.getTracks().forEach(t => t.stop());
   const lease = currentJob?.lease;

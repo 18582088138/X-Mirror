@@ -67,8 +67,59 @@ export async function createStore({ root, ffmpeg = 'ffmpeg', ffprobe = 'ffprobe'
     const meta = JSON.parse(await readFile(join(materialsRoot, id, 'material.json'), 'utf8'));
     return { ...meta, image: `/media/custom-materials/${id}/${meta.file}`, custom: true };
   };
+  // 预置素材的修改保存在 material-edits/<id>/，不改动仓库里的原图和 presets.json；删除该目录即恢复默认。
+  const editsRoot = join(root, 'material-edits');
+  const editId = id => { if (typeof id !== 'string' || !/^[\w-]{1,40}$/.test(id)) throw new Error('无效素材编号'); return id; };
+  const checkFields = ({ name, prompt }) => {
+    name = String(name || '').trim(); prompt = String(prompt || '').trim();
+    if (!name || name.length > 30) throw new Error('名称不能为空，且不超过 30 字');
+    if (!prompt || [...prompt].length > 1024) throw new Error('提示词不能为空，且不超过 1024 字');
+    return { name, prompt };
+  };
+  const imageExtension = type => {
+    const extension = imageTypes[String(type).split(';')[0].trim()];
+    if (!extension) throw new Error('素材图片仅支持 PNG / JPEG / WebP');
+    return extension;
+  };
   return {
     root, transcode, loadClip, readRun,
+    // 预置素材的已保存修改：id -> { name, prompt, image? }
+    async edits() {
+      const result = {};
+      for (const id of await readdir(editsRoot).catch(() => [])) {
+        try {
+          const edit = JSON.parse(await readFile(join(editsRoot, id, 'edit.json'), 'utf8'));
+          result[id] = { name: edit.name, prompt: edit.prompt, ...(edit.file ? { image: `/media/material-edits/${id}/${edit.file}` } : {}) };
+        } catch { /* Skip incomplete entries. */ }
+      }
+      return result;
+    },
+    async editBuiltin(id, fields, buffer, type) {
+      const dir = join(editsRoot, editId(id)); const clean = checkFields(fields);
+      let previous = {}; try { previous = JSON.parse(await readFile(join(dir, 'edit.json'), 'utf8')); } catch { /* First edit. */ }
+      await mkdir(dir, { recursive: true }); let file = previous.file;
+      if (buffer.length) {
+        if (buffer.length < 100) throw new Error('图片为空');
+        file = `image-${Date.now()}.${imageExtension(type)}`; await writeFile(join(dir, file), buffer);
+        if (previous.file && previous.file !== file) await rm(join(dir, previous.file), { force: true });
+      }
+      await writeFile(join(dir, 'edit.json'), JSON.stringify({ ...clean, ...(file ? { file } : {}), updatedAt: new Date().toISOString() }, null, 2));
+      return { ...clean, ...(file ? { image: `/media/material-edits/${id}/${file}` } : {}) };
+    },
+    async resetBuiltin(id) { await rm(join(editsRoot, editId(id)), { recursive: true, force: true }); },
+    async editCustom(id, fields, buffer, type) {
+      if (!validId(id)) throw new Error('无效素材编号');
+      const dir = join(materialsRoot, id), meta = JSON.parse(await readFile(join(dir, 'material.json'), 'utf8')); const clean = checkFields(fields);
+      let category = String(fields.category ?? meta.category).trim() || '我的素材';
+      if (category.length > 12) throw new Error('分类不超过 12 字');
+      if (buffer.length) {
+        if (buffer.length < 100) throw new Error('图片为空');
+        const file = `image-${Date.now()}.${imageExtension(type)}`; await writeFile(join(dir, file), buffer);
+        await rm(join(dir, meta.file), { force: true }); meta.file = file;
+      }
+      await writeFile(join(dir, 'material.json'), JSON.stringify({ ...meta, ...clean, category }, null, 2));
+      return loadMaterial(id);
+    },
     async materials() {
       const list = [];
       for (const id of await readdir(materialsRoot).catch(() => [])) {

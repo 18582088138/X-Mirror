@@ -20,7 +20,9 @@ const ids = builtinPresets.map(p => p.id);
 const allPresets = async () => {
   const custom = await store.materials();
   for (const p of custom) if (!ids.includes(p.id)) ids.push(p.id);
-  return [...builtinPresets, ...custom];
+  const edits = await store.edits();
+  // 预置素材的修改覆盖名称和提示词；换了图片就不再使用官方参考图地址，改为上传新图。
+  return [...builtinPresets.map(p => edits[p.id] ? { ...p, ...edits[p.id], edited: true, ...(edits[p.id].image ? { referenceUrl: null } : {}) } : p), ...custom];
 };
 const api = createApi({ env: { ...env, XMAX_OUTPUT_SECONDS: '10' }, caseIds: ids, repeatableCaseIds: ids, ledgerPath: '.local/attempts.json', request });
 const offline = createOffline({ env, store, request, base: api.config.base, intervalMs: Number(env.XMAX_OFFLINE_POLL_MS) || 1500 });
@@ -60,6 +62,16 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/materials') {
       const material = await store.saveMaterial(await readBody(req, 10 * 1024 * 1024), req.headers['content-type'] || '', Object.fromEntries(url.searchParams));
       ids.push(material.id); return reply(200, material);
+    }
+    const change = /^\/api\/materials\/([^/]+)\/(update|reset)$/.exec(url.pathname);
+    if (change) {
+      const [, id, action] = change, builtin = builtinPresets.some(p => p.id === id);
+      if (action === 'reset') { if (!builtin) throw new Error('只有预置素材可以恢复默认'); await store.resetBuiltin(id); }
+      else {
+        const body = await readBody(req, 10 * 1024 * 1024), type = req.headers['content-type'] || '', fields = Object.fromEntries(url.searchParams);
+        if (builtin) await store.editBuiltin(id, fields, body, type); else await store.editCustom(id, fields, body, type);
+      }
+      return reply(200, (await allPresets()).find(p => p.id === id));
     }
     const removal = /^\/api\/materials\/([^/]+)\/delete$/.exec(url.pathname);
     if (removal) {

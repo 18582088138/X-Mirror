@@ -2,7 +2,7 @@ import { chromium } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import http from 'node:http';
 import { createReadStream } from 'node:fs';
-import { mkdir, readFile, writeFile, stat } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, stat, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadSharedEnv } from '../server/env.mjs';
@@ -20,6 +20,7 @@ if (!(await stat(cameraFile).catch(() => undefined))) {
 }
 const port = real ? 5197 : 5196, base = `http://127.0.0.1:${port}`;
 const outputDir = real ? '.local/live-output' : '.local/ui-output';
+await rm(outputDir, { recursive: true, force: true }); // 每次从空目录开始，避免上次的素材修改和历史影响断言
 await mkdir('.local', { recursive: true });
 // 模拟离线任务服务：第一次查询处于 processing，之后 completed 并返回一段合成视频。
 let offlinePosts = 0, offlinePolls = 0;
@@ -56,8 +57,14 @@ try {
   await page.goto(base); await page.waitForFunction(() => document.querySelectorAll('.material-card').length === 12);
   assert.equal(await page.locator('.material-dock').evaluate(e => getComputedStyle(e).position), 'fixed');
   assert.equal(await page.locator('#record').isDisabled(), true);
-  await page.locator('[data-id="hat"] .material-preview').click(); assert.equal(await page.locator('#preview-dialog').isVisible(), true);
-  await page.locator('#preview-close').click(); assert.equal(starts, 0);
+  page.on('dialog', dialog => dialog.accept());
+  // 点击素材只打开编辑窗口，不会触发生成；「使用生成」才提交任务。
+  const useMaterial = async id => { await page.locator(`[data-id="${id}"] .material-open`).click(); await page.locator('#edit-use').click(); };
+  await page.locator('[data-id="hat"] .material-open').click(); assert.equal(await page.locator('#edit-dialog').isVisible(), true);
+  assert.equal(await page.locator('#edit-name').inputValue(), '帽子试穿'); assert.ok((await page.locator('#edit-prompt').inputValue()).length > 5);
+  await page.locator('#edit-use').click(); assert.match(await page.locator('#edit-error').textContent(), /请先录制或上传/);
+  assert.equal(await page.locator('#edit-dialog').isVisible(), true, 'no clip: dialog stays open');
+  await page.locator('#edit-close').click(); assert.equal(starts, 0);
   await page.locator('#camera').click(); await page.waitForFunction(() => !document.querySelector('#record').disabled);
   await page.locator('#duration').fill('3'); await page.locator('#duration').dispatchEvent('input');
   await page.locator('#record').click(); await page.waitForFunction(() => document.querySelector('#input-badge').textContent === '已录制 3 秒', undefined, { timeout: 20000 });
@@ -67,24 +74,38 @@ try {
   const sourceProbe = JSON.parse(await readFile(resolve(outputDir, currentClipId, 'input-probe.json'), 'utf8'));
   assert.ok(Number(sourceProbe.format.duration) <= 3.1, 'saved input respects requested 3-second bound');
   const range = await fetch(base + sourceUrl, { headers: { Range: 'bytes=0-99' } }); assert.equal(range.status, 206); assert.equal((await range.arrayBuffer()).byteLength, 100);
-  await page.locator('[data-id="hat"] .material-use').click();
+  const editedPrompt = '测试提示词：把参考图里的帽子戴在人物头上，其他保持不变';
+  if (!real) { await page.locator('[data-id="hat"] .material-open').click(); await page.locator('#edit-prompt').fill(editedPrompt); await page.locator('#edit-use').click(); }
+  else await useMaterial('hat');
   await page.waitForFunction(id => document.querySelector('#output-badge').textContent === '已保存' && document.querySelector('#output-download').getAttribute('href')?.startsWith(`/media/${id}/runs/`), currentClipId, { timeout: real ? 540000 : 30000 });
   const output = await page.locator('#output-download').getAttribute('href'); assert.ok(output.includes('/runs/')); assert.notEqual(output, sourceUrl);
   await page.waitForFunction(() => document.querySelector('#output-video').readyState >= 2);
   assert.ok(await page.locator('#output-video').evaluate(video => video.videoWidth > 0));
   await page.screenshot({ path: '.local/studio-desktop.png', fullPage: true });
   const history = await (await fetch(`${base}/api/history`)).json(); const latest = history.runs.find(r => r.videoUrl === output);
+  if (!real) {
+    assert.equal(latest.prompt, editedPrompt, 'generation uses the edited prompt');
+    assert.equal((await readFile(resolve(latest.directory, 'prompt.txt'), 'utf8')).trim(), editedPrompt);
+    assert.match(await page.locator('[data-id="hat"] .material-label span').textContent(), /已修改/);
+  }
   assert.equal(latest.status, 'saved'); assert.equal(latest.presetId, 'hat'); assert.ok((await stat(resolve(latest.directory, latest.video))).size > 1000);
   if (!real) {
     // The same persisted source can be edited again without recapturing.
-    await page.locator('[data-id="top"] .material-use').click();
+    await useMaterial('top');
     await page.waitForFunction(() => document.querySelector('#output-badge').textContent === '已保存' && document.querySelector('#output-info').textContent.includes('单品'), undefined, { timeout: 30000 });
     assert.equal(await page.locator('#input-download').getAttribute('href'), sourceUrl);
     await page.reload(); await page.waitForFunction(() => document.querySelectorAll('.history-item').length >= 2);
     assert.equal(await page.locator('#input-download').getAttribute('href'), sourceUrl);
     await page.locator('.history-item').last().click(); assert.ok(await page.locator('#output-download').getAttribute('href'));
+    // 修改会保存：刷新后仍是修改后的提示词，可以恢复默认。
+    await page.locator('[data-id="hat"] .material-open').click();
+    assert.equal(await page.locator('#edit-prompt').inputValue(), editedPrompt); assert.equal(await page.locator('#edit-reset').isVisible(), true);
+    await page.locator('#edit-reset').click(); await page.waitForFunction(() => !document.querySelector('#edit-dialog').open);
+    await page.locator('[data-id="hat"] .material-open').click();
+    assert.notEqual(await page.locator('#edit-prompt').inputValue(), editedPrompt); assert.equal(await page.locator('#edit-reset').isHidden(), true);
+    await page.locator('#edit-close').click();
     // Cancel while key issuance is pending; the late lease must be released.
-    delay = 1500; await page.locator('[data-id="face"] .material-use').click();
+    delay = 1500; await useMaterial('face');
     await page.waitForFunction(() => !document.querySelector('#cancel').disabled); await page.locator('#cancel').click(); await pause(2300);
     assert.equal(starts, 3); assert.equal(finishes, 3); assert.equal(offlinePosts, 2, 'cancelled run never submits a paid task');
     // Verify the upper capture limit and device shutdown.
