@@ -50,9 +50,8 @@ export class ClipRecorder {
     clearInterval(this.timer);
     try {
       if (this.failure) throw this.failure;
-      // Drain pending work before the final frame, so backpressure cannot lose
-      // the end of the clip. Its timestamp remains on the original clip clock.
-      await this.encoder.flush();
+      // Snapshot the final pixels before awaiting encoding: the result track may
+      // end while the backend revokes the session. Allow one final queued frame.
       this.frame(Math.max(0, Math.round(elapsedMs*1000)-33333), true);
       await this.encoder.flush();
       this.muxer.finalize();
