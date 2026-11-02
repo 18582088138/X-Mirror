@@ -4,8 +4,8 @@ import { networkInterfaces } from "node:os";
 import { randomBytes } from "node:crypto";
 import { resolve, extname, sep } from "node:path";
 import { createServer, loadEnv } from "vite";
-import { ProxyAgent, fetch as proxyFetch } from "undici";
 import { ApiError, createApi } from "./server/api.mjs";
+import { createNetworkRequest } from "./server/network.mjs";
 import { createProducts } from "./server/products.mjs";
 import { createOffline } from "./server/offline.mjs";
 import { createVideo } from "./server/video.mjs";
@@ -23,16 +23,12 @@ const publicOrigin = env.PUBLIC_ORIGIN
 const demoEnabled =
   env.ENABLE_LOCAL_DEMO === "1" ||
   (!publicOrigin && env.ENABLE_LOCAL_DEMO !== "0");
-const proxy = env.XMAX_PROXY_URL
-  ? new ProxyAgent(env.XMAX_PROXY_URL)
-  : undefined;
-const request = proxy
-  ? (url, options) => proxyFetch(url, { ...options, dispatcher: proxy })
-  : fetch;
+const network = createNetworkRequest(env);
+const { request } = network;
 const api = createApi({ env, request, ledgerPath: ".local/sessions.json" });
 const offline = createOffline({ env, base: api.config.base, request });
 const video = createVideo({ env });
-const products = createProducts({ proxyRequest: proxy ? request : undefined });
+const products = createProducts({ proxyRequest: network.proxyEnabled ? request : undefined });
 const hosts = new Set([
   `localhost:${port}`,
   `127.0.0.1:${port}`,
@@ -236,6 +232,6 @@ for (const signal of ["SIGINT", "SIGTERM"])
     await api.close();
     await vite?.close();
     server.close();
-    await proxy?.close();
+    await network.close();
     process.exit(0);
   });

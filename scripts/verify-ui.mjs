@@ -99,6 +99,22 @@ try {
   await page.waitForFunction(() =>
     document.querySelector("#source-name")?.textContent.includes("Studio"),
   );
+  const brokenImages = await page.evaluate(async () => {
+    const { items } = await (await fetch("/api/catalog")).json();
+    const broken = [];
+    for (const item of items) {
+      try {
+        const response = await fetch(item.image);
+        if (!response.ok) throw new Error(String(response.status));
+        const bitmap = await createImageBitmap(await response.blob());
+        bitmap.close();
+      } catch {
+        broken.push(item.image);
+      }
+    }
+    return broken;
+  });
+  assert.deepEqual(brokenImages, []);
   assert.equal(await page.locator("#start").isDisabled(), true);
   assert.equal(starts, 0);
   assert.equal(await page.locator("#quota").textContent(), "测试次数不限");
@@ -207,7 +223,7 @@ try {
   await page.locator("#source-open").click();
   await page
     .locator("#model-file")
-    .setInputFiles("ref_material/materials/inputs/woman.mp4");
+    .setInputFiles("ref_material/model/woman.mp4");
   await page.waitForFunction(() =>
     document
       .querySelector("#source-description")

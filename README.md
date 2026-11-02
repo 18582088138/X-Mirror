@@ -34,11 +34,11 @@ npm run dev
 npm run prepare:demo
 ```
 
-该脚本从 `ref_material` 和根目录 Logo 提取本地预览与参考单品。`public/demo` 不进入 Git；克隆仓库后没有原始参考素材也可以上传自己的素材使用。优化后的应用 Logo 位于 `public/brand/logo.webp`。
+该脚本从 `ref_material/clothes` 和 `ref_material/model` 准备服装、配饰及模特素材；GUI 通过 `/demo/` 使用生成结果，不会直接公开原始目录。`public/demo` 不进入 Git；克隆仓库后没有原始参考素材也可以上传自己的素材使用。优化后的应用 Logo 位于 `public/brand/logo.webp`。
 
 ## 已实现的流程
 
-默认模特使用 `ref_material/网站试衣服.mov` 的动态视频，裁剪左侧模特区域后转换为兼容浏览器的 MP4，保留原片 1.6 秒动作。人物预览和原图对比直接循环播放。有视频的模特始终以完整原片连续视频流送入试穿模型；视频自动输出同长度动态短片，照片自动输出照片。输出类型不能独立切换。小缩略图直接使用视频元素，不提取候选 JPEG。结果播放器正常速度播放一次，显示精确秒数并提供完整回放控件。
+默认模特使用 `ref_material/model/studio.mp4`，保留原片 1.6 秒动作；其他内置模特也从 `ref_material/model` 复制对应 MP4。人物预览和原图对比直接循环播放。有视频的模特始终以完整原片连续视频流送入试穿模型；视频自动输出同长度动态短片，照片自动输出照片。输出类型不能独立切换。小缩略图直接使用视频元素，不提取候选 JPEG。结果播放器正常速度播放一次，显示精确秒数并提供完整回放控件。
 
 服饰按「套装 / 上衣 / 下装 / 配饰」分类。完整上下装、连衣裙、连体衣归套装，外套和衬衫等归上衣；裤子、半身裙归下装，帽子和眼镜归配饰。上传和商品链接导入使用当前选中的分类。套装与单独上衣/下装互斥，配饰可单独搭配；套装和下装要求全身素材。参考图和生成指令按类别标记完整换装或局部替换范围。内置图片分类共用 `src/demo-catalog.json`。
 
@@ -76,13 +76,13 @@ npm run prepare:demo
 
 **预留积分是预算上限，不等于实际账单。** XMAX 按连接时间收费，连接初始化和等待也可能计费；实际余额、扣费及第三方素材保留时间以供应商控制台和政策为准。
 
-`XMAX_PROXY_URL` 只配置 Node 后端 HTTP 请求。浏览器的 SDK 请求与 WebRTC 仍需要可工作的网络；只配置后端代理不保证实时媒体能连接。
+`XMAX_PROXY_URL` 只配置 Node 后端 HTTP 请求，并优先于标准的 `HTTPS_PROXY`、`HTTP_PROXY` 和 `NO_PROXY`；未设置专用变量时会自动使用这些标准变量。部署机若不需要代理，应将这些变量留空；若必须经过代理，应填写部署网络实际可访问的代理，不要复用其他网络的企业代理。浏览器的 SDK 请求与 WebRTC 仍需要可工作的网络；只配置后端代理不保证实时媒体能连接。
 
 ## 服饰参考图
 
 单品参考图保留原始尺寸，最长边上限 2048 像素，使用较高 JPEG 质量；多单品参考拼图高度 2048，每列 1024 像素宽。界面显示所选单品实际尺寸，对低清图给出换图建议。推荐商品正面原图最长边 1500～2000px，完整衣服、主体占比大、纹理清楚；800px 图可试用，但小图案和五金细节更容易丢失。直接放大小图无法补回原始细节。
 
-本地内置服饰不再从 GUI 小截图放大：外套、裙子从官方原始素材提取，帽子保留原图尺寸，牛仔裤使用真实高清照片缩小至约 2048px。运行 `prepare:demo` 时仅在本地缺少牛仔裤原图时下载，网络代理沿用 `XMAX_PROXY_URL`。示例牛仔裤作者为 A Continuous Lean，来自 [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Tellason_jeans,_front.jpg)，授权 [CC BY 2.0](https://creativecommons.org/licenses/by/2.0/)，已缩小尺寸，署名也在本地使用指南中显示。素材仍不进入 Git。
+本地内置服饰不再从 GUI 小截图放大：外套、裙子从官方原始素材提取，帽子保留原图尺寸，牛仔裤使用真实高清照片缩小至约 2048px。运行 `prepare:demo` 时仅在牛仔裤原图和已生成图片都缺失时下载，网络代理沿用 `XMAX_PROXY_URL`。示例牛仔裤作者为 A Continuous Lean，来自 [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Tellason_jeans,_front.jpg)，授权 [CC BY 2.0](https://creativecommons.org/licenses/by/2.0/)，已缩小尺寸，署名也在本地使用指南中显示。素材仍不进入 Git。
 
 ## 画质、时长与响应时间（2026-11-02）
 
@@ -103,7 +103,7 @@ npm start
 
 公开部署时使用 HTTPS 反向代理，并将 `PUBLIC_ORIGIN` 配置为实际站点的完整来源，例如 `https://mirror.example.com`。该值用于访问主机和跨来源请求校验。
 
-本地预置的模特视频和服饰默认在 `npm run dev` 与 `npm start` 下都会加载，启动后无需手动添加；配置了 `PUBLIC_ORIGIN` 的公开部署默认关闭，设 `ENABLE_LOCAL_DEMO=0` 也可关闭，公开实例确需展示时设 `ENABLE_LOCAL_DEMO=1`。官方演示素材未声明开放授权，不要将它们作为可公开分发的商品或模特素材。
+本地预置的模特视频和服饰仅在 `ENABLE_LOCAL_DEMO=1` 时加载。当前本地配置与示例配置均设为 `0`，启动后不预置模特或服饰图片，但保留上传、录制、分类选择和试穿等原始 GUI；配置了 `PUBLIC_ORIGIN` 的公开部署也默认关闭。官方演示素材未声明开放授权，不要将它们作为可公开分发的商品或模特素材。
 
 服务端额度日志需要持久磁盘，首版只支持一个 Node 进程。多进程部署需要共享预算和会话锁。不要为增加额度而删除当日额度日志。
 
@@ -114,9 +114,10 @@ npm test
 npm run test:ui
 npm run build
 npm run test:production
+npm run test:demo
 ```
 
-`test:ui` 需要先启动开发服务器和安装桌面 Chrome；它使用明确标为测试用途的 SDK 替身，不调用付费模型，验证照片与视频生命周期、摄像头、选帧、下载、取消、布局和商品流程。验证产物在 `.local/verification`。
+`test:ui` 需要先以 `ENABLE_LOCAL_DEMO=1` 启动开发服务器并安装桌面 Chrome；它使用明确标为测试用途的 SDK 替身，不调用付费模型，验证照片与视频生命周期、摄像头、选帧、下载、取消、布局和商品流程。验证产物在 `.local/verification`。
 
 真实验证需要已配置 API Key，会消耗额度：
 
