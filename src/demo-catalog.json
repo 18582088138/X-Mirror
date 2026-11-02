@@ -1,0 +1,11 @@
+[
+  { "id": "suit", "name": "学院风西装裙套装", "category": "suit", "image": "/demo/suit.jpg", "detail": "套装 · 西装外套 + 百褶裙" },
+  { "id": "sweatshirt", "name": "学院风西装外套", "category": "top", "image": "/demo/sweatshirt.jpg", "detail": "上衣 · 黑色西装外套" },
+  { "id": "shirt", "name": "条纹短款外套", "category": "top", "image": "/demo/top.jpg", "detail": "上衣 · 米白条纹外套" },
+  { "id": "jacket", "name": "米白休闲夹克", "category": "top", "image": "/demo/jacket.jpg", "detail": "上衣 · 休闲夹克" },
+  { "id": "sweater", "name": "纹理针织衫", "category": "top", "image": "/demo/sweater.jpg", "detail": "上衣 · 针织衫" },
+  { "id": "coat", "name": "毛领短外套", "category": "top", "image": "/demo/coat.jpg", "detail": "上衣 · 短外套" },
+  { "id": "jeans", "name": "直筒原色牛仔裤", "category": "bottom", "image": "/demo/jeans.jpg", "detail": "下装 · 深蓝牛仔裤" },
+  { "id": "skirt", "name": "学院风百褶短裙", "category": "bottom", "image": "/demo/skirt.jpg", "detail": "下装 · 墨黑百褶裙" },
+  { "id": "hat", "name": "白色棒球帽", "category": "accessory", "image": "/demo/hat.jpg", "detail": "配饰 · 奶白棒球帽", "accessory": "帽子" }
+]

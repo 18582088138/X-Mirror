@@ -1,5 +1,6 @@
 import "./style.css";
 import { icon } from "./icons";
+import demoCatalog from "./demo-catalog.json";
 import {
   readSource,
   validateImage,
@@ -9,6 +10,9 @@ import {
   loadImage,
   waitMedia,
   labels,
+  categories,
+  categoryHelp,
+  applyGarment,
   type Category,
   type Source,
   type Garment,
@@ -33,7 +37,7 @@ let config: Config | undefined;
 let source: Source | undefined;
 let catalog: Garment[] = [];
 const slots: Partial<Record<Category, Garment>> = {};
-let category: Category = "top";
+let category: Category = "suit";
 let mode: "photo" | "video" = "photo";
 let busy = false,
   finishing = false,
@@ -89,20 +93,21 @@ $("app").innerHTML = `
     <div class="mode-row"><div class="segmented" aria-label="根据人物素材自动选择输出类型"><button id="mode-photo" class="selected" aria-pressed="true">试穿照片</button><button id="mode-video" aria-pressed="false">动态短片</button></div><span id="mode-note">保存一张试穿照片</span></div>
     <div class="section-label" id="outfit"><span><b>02</b> 搭配你的下一套</span><span class="muted" id="outfit-count">选择心动的单品</span></div>
     <div id="slots" class="outfit-slots" aria-label="搭配槽位"></div>
-    <div class="category-tabs" role="tablist" aria-label="服饰类别"><button data-category="top" role="tab" aria-selected="true" class="selected">上衣</button><button data-category="bottom" role="tab" aria-selected="false">下装</button><button data-category="accessory" role="tab" aria-selected="false">配饰</button><span id="catalog-note">我的衣橱</span></div>
+    <div class="category-tabs" role="tablist" aria-label="服饰类别">${categories.map(key => `<button data-category="${key}" role="tab" aria-selected="${key === category}" class="${key === category ? "selected" : ""}">${labels[key]}</button>`).join("")}<span id="catalog-note">我的衣橱</span></div>
+    <p id="category-help" class="field-note">${categoryHelp.suit}</p>
     <div class="wardrobe" id="wardrobe" aria-label="可选单品"></div>
     <p id="garment-quality" class="field-note" role="status" hidden></p>
     <div class="accessory-kind" id="accessory-kind" hidden><label for="accessory-select">配饰类型</label><select id="accessory-select"><option>帽子</option><option>眼镜</option></select><small>配饰与多件搭配为实验功能</small></div>
     <form id="link-form" class="product-link"><span>${icon("link")}</span><label class="sr-only" for="product-url">商品或服饰图片链接</label><input id="product-url" type="url" placeholder="粘贴商品链接或服饰图片链接" maxlength="2000"><button id="resolve-link" type="submit">添加 ${icon("plus")}</button></form>
     <p id="link-status" class="field-note" role="status" hidden></p><button id="bind-link" class="bind-link" hidden>将此购买链接绑定到当前单品 ↗</button>
-    <label class="upload-zone" id="garment-drop" for="garment-file">${icon("upload")}<span><strong>直接上传服饰图片</strong><small>点击或拖入 · JPG / PNG / WebP，最大 10 MB</small></span>${icon("plus")}</label><input id="garment-file" type="file" accept="image/jpeg,image/png,image/webp" hidden>
+    <label class="upload-zone" id="garment-drop" for="garment-file">${icon("upload")}<span><strong id="garment-upload-title">上传套装图片</strong><small>点击或拖入 · JPG / PNG / WebP，最大 10 MB</small></span>${icon("plus")}</label><input id="garment-file" type="file" accept="image/jpeg,image/png,image/webp" hidden>
     <label class="consent"><input id="consent" type="checkbox"><span>我已获素材使用授权，同意由 XMAX 处理人物画面和服饰图片。</span></label>
    </fieldset>
    <button id="start" class="primary" disabled>${icon("spark")}<span>一键试穿</span>${icon("arrow")}</button>
    <div class="generate-meta"><span id="generate-note">只在点击试穿后开始生成</span><button id="stop" hidden>停止生成</button><span id="quota"></span></div>
    <p class="status" id="status" role="status" aria-live="polite">正在准备试衣间…</p>
    <div id="shopping" class="shopping" hidden><span class="eyebrow">LOVE THE LOOK?</span><h2>喜欢这套，去看看实物。</h2><div id="shopping-items"></div><p>跳转原商品页面购买；价格和库存以商家为准。</p></div>
-   <div class="perks"><div>${icon("camera")}<span>一段短视频<small>建议 5 秒 · 最长 10 秒</small></span></div><div>${icon("shirt")}<span>自由搭配<small>上衣 / 下装 / 配饰</small></span></div><div>${icon("shield")}<span>轻量试穿<small>生成结果留在本机</small></span></div></div>
+   <div class="perks"><div>${icon("camera")}<span>一段短视频<small>建议 5 秒 · 最长 10 秒</small></span></div><div>${icon("suit")}<span>自由搭配<small>套装 / 上衣 / 下装 / 配饰</small></span></div><div>${icon("shield")}<span>轻量试穿<small>生成结果留在本机</small></span></div></div>
    <p class="disclaimer">AI 生成效果供穿搭参考，无法判断真实尺码与合身程度。</p>
    <footer><span>X-MIRROR · MADE FOR YOUR NEXT LOOK</span><span>POWERED BY XMAX</span></footer>
  </section>
@@ -270,7 +275,7 @@ function setMode() {
 }
 function renderSlots() {
   $("slots").replaceChildren();
-  for (const key of ["top", "bottom", "accessory"] as Category[]) {
+  for (const key of categories) {
     const item = slots[key];
     const card = document.createElement("div");
     card.className = `outfit-slot ${category === key ? "active" : ""}`;
@@ -286,7 +291,7 @@ function renderSlots() {
       visual.append(image);
     } else
       visual.innerHTML = icon(
-        key === "top" ? "shirt" : key === "bottom" ? "pants" : "hat",
+        key === "suit" ? "suit" : key === "top" ? "shirt" : key === "bottom" ? "pants" : "hat",
       );
     const caption = document.createElement("span");
     const label = document.createElement("b");
@@ -329,16 +334,19 @@ function selectCategory(next: Category) {
       button.setAttribute("aria-selected", String(selected));
     });
   $("accessory-kind").hidden = category !== "accessory";
+  $("category-help").textContent = categoryHelp[category];
+  $("garment-upload-title").textContent = `上传${labels[category]}图片`;
   renderSlots();
   renderWardrobe();
 }
 function choose(item: Garment) {
   if (busy || finishing) return;
-  slots[item.category] = item;
+  const replaced = item.category === "suit" ? !!(slots.top || slots.bottom) : (item.category === "top" || item.category === "bottom") && !!slots.suit;
+  applyGarment(slots, item);
   category = item.category;
   clearResult();
   selectCategory(category);
-  status(`已添加${item.name}，可以继续搭配。`);
+  status(`已添加${item.name}${replaced ? item.category === "suit" ? "，已替换原先的上衣和下装，可继续添加配饰。" : "，已移除套装，可继续搭配其他单品。" : "，可以继续搭配。"}`);
 }
 function renderWardrobe() {
   $("wardrobe").replaceChildren();
@@ -369,7 +377,7 @@ function renderWardrobe() {
     button.onclick = () => choose(item);
     $("wardrobe").append(button);
   });
-  const chosen = Object.values(slots) as Garment[];
+  const chosen = categories.flatMap(key => slots[key] ? [slots[key]!] : []);
   const low = chosen.filter((g) => g.width && g.height && Math.min(g.width, g.height) < 768);
   $("garment-quality").hidden = !chosen.length;
   $("garment-quality").textContent = chosen.map((g) => `${g.name} · ${g.width || "?"} × ${g.height || "?"}`).join("；")
@@ -396,19 +404,21 @@ function purchaseLink(): string | undefined {
 }
 async function uploadGarment(file: File) {
   if (busy || finishing || linkBusy) return;
+  const selectedCategory = category;
+  const accessory = $<HTMLSelectElement>("accessory-select").value;
   try {
     const dimensions = await validateImage(file);
     const item: Garment = {
       id: crypto.randomUUID(),
       name: file.name.replace(/\.[^.]+$/, ""),
-      category,
+      category: selectedCategory,
       image: objectURL(file),
       ...dimensions,
       file,
       purchaseUrl: purchaseLink(),
       accessory:
-        category === "accessory"
-          ? $<HTMLSelectElement>("accessory-select").value
+        selectedCategory === "accessory"
+          ? accessory
           : undefined,
     };
     catalog.unshift(item);
@@ -430,6 +440,7 @@ $("link-form").onsubmit = async (event) => {
     return;
   }
   const selectedCategory = category;
+  const selectedAccessory = $<HTMLSelectElement>("accessory-select").value;
   linkBusy = true;
   $<HTMLButtonElement>("resolve-link").disabled = true;
   controls();
@@ -457,7 +468,7 @@ $("link-form").onsubmit = async (event) => {
       purchaseUrl: url,
       accessory:
         selectedCategory === "accessory"
-          ? $<HTMLSelectElement>("accessory-select").value
+          ? selectedAccessory
           : undefined,
     };
     catalog.unshift(item);
@@ -836,9 +847,9 @@ async function end(error?: string) {
 $("start").onclick = async () => {
   if ($<HTMLButtonElement>("start").disabled || !source || busy || finishing)
     return;
-  const outfit = Object.values(slots) as Garment[];
-  if (source.coverage === "half" && slots.bottom) {
-    status("试下装需要腿部完整入镜，请更换全身素材或移除下装。", true);
+  const outfit = categories.flatMap(key => slots[key] ? [slots[key]!] : []);
+  if (source.coverage === "half" && (slots.bottom || slots.suit)) {
+    status("试套装或下装需要腿部完整入镜，请更换全身素材，或仅选择上衣 / 配饰。", true);
     return;
   }
   clearResult();
@@ -961,7 +972,7 @@ void (async () => {
   try {
     await refreshConfig();
     const data = await api<{ items: Garment[] }>("/api/catalog");
-    catalog = data.items;
+    catalog = config?.demoEnabled ? demoCatalog as Garment[] : data.items;
     await Promise.all(catalog.map(async (item) => {
       try {
         const image = await loadImage(item.image);
@@ -980,9 +991,9 @@ void (async () => {
           }),
           "full",
         );
-      const initial = catalog.find((item) => item.id === "shirt");
+      const initial = catalog.find((item) => item.id === "suit");
       if (initial) {
-        slots.top = initial;
+        applyGarment(slots, initial);
         renderSlots();
         renderWardrobe();
       }

@@ -52,6 +52,7 @@ try {
     () => document.querySelector("#source-name").textContent === "person.png",
   );
   await page.locator("#source-done").click();
+  await page.locator('[data-category="top"]').click();
   await page.locator("#garment-file").setInputFiles("public/demo/top.jpg");
   await page.waitForFunction(() =>
     document.querySelector("#slots").textContent.includes("top"),

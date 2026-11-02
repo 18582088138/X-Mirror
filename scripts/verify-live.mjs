@@ -55,7 +55,7 @@ try {
   );
   await page.locator("#consent").check();
   for (const name of cases) {
-    for (const category of ["上衣", "下装", "配饰"]) {
+    for (const category of ["套装", "上衣", "下装", "配饰"]) {
       const remove = page.getByRole("button", {
         name: `移除${category}`,
         exact: true,

@@ -6,7 +6,8 @@ export type Source = {
   coverage: "full" | "half";
   isVideo: boolean;
 };
-export type Category = "top" | "bottom" | "accessory";
+export const categories = ["suit", "top", "bottom", "accessory"] as const;
+export type Category = typeof categories[number];
 export type Garment = {
   id: string;
   name: string;
@@ -20,10 +21,22 @@ export type Garment = {
   purchaseUrl?: string;
 };
 export const labels: Record<Category, string> = {
+  suit: "套装",
   top: "上衣",
   bottom: "下装",
   accessory: "配饰",
 };
+export const categoryHelp: Record<Category, string> = {
+  suit: "完整上衣 + 下装、连衣裙或连体衣；请上传整套服装的清晰正面图。",
+  top: "外套、衬衫、夹克、针织衫等；只更换上衣，保留原有裤裙。",
+  bottom: "裤子、半身裙等；只更换下装，保留原有上衣。",
+  accessory: "帽子、眼镜等；选择对应配饰类型，保留原有服装。",
+};
+export function applyGarment(slots: Partial<Record<Category, Garment>>, item: Garment) {
+  if (item.category === "suit") { delete slots.top; delete slots.bottom; }
+  if (item.category === "top" || item.category === "bottom") delete slots.suit;
+  slots[item.category] = item;
+}
 
 export function waitMedia(
   target: HTMLMediaElement,
@@ -255,7 +268,17 @@ export async function buildReference(garments: Garment[]) {
   };
 }
 export function buildPrompt(garments: Garment[], layout: string) {
-  return `将参考图中的服饰穿戴到视频人物身上，跟随人物原有动作。${layout}。只更换${garments.map((g) => labels[g.category] + (g.accessory || "")).join("、")}，保持人物面容、身份、发型、体型、姿势、背景和其余衣物不变。准确保留商品颜色、版型、纹理、图案与细节，呈现自然的布料和光影。参考图的背景、文字标签与展示道具不要出现在生成画面中。`;
+  const selected = new Set(garments.map(g => g.category));
+  if (selected.has("suit") && (selected.has("top") || selected.has("bottom")))
+    throw new Error("套装不能与单独的上衣或下装同时试穿，请重新选择");
+  const instructions = garments.map(g => {
+    if (g.category === "suit") return "套装：完整穿上参考图中的整套上衣及下装，或完整的连衣裙、连体衣；保持整套服装的款式、上下搭配、裙摆或裤腿长度，不要仅替换上衣";
+    if (g.category === "top") return `上衣：仅更换上身服装${selected.has("bottom") ? "，下装按其独立参考图处理" : "，保留原有裤子或裙子的款式、长度和覆盖范围，禁止把长裤改为裙子或短裤"}`;
+    if (g.category === "bottom") return `下装：仅更换裤子或半身裙${selected.has("top") ? "，上衣按其独立参考图处理" : "，保留原有上衣及外套"}`;
+    return `配饰：仅将参考图中的${g.accessory || "配饰"}佩戴到对应位置，不改变其他未选择的配饰`;
+  }).join("；");
+  const preserve = selected.has("accessory") ? "鞋袜及其他未选择的配饰" : "所有原有配饰及鞋袜";
+  return `将参考图中的服饰穿戴到原始人物画面中，视频跟随人物原有动作，照片保持原有姿势。${layout}。${instructions}。保持人物面容、身份、发型、体型、姿势、背景、${preserve}和其他未选择的衣物不变。准确保留商品颜色、版型、纹理、图案与细节，呈现自然的布料和光影。只处理所选类别；参考图中的其他服装、展示人物、背景、文字标签与展示道具不要出现在生成画面中。`;
 }
 export async function normalizeRecording(
   blob: Blob,

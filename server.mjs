@@ -7,6 +7,7 @@ import { createServer, loadEnv } from "vite";
 import { ProxyAgent, fetch as proxyFetch } from "undici";
 import { ApiError, createApi } from "./server/api.mjs";
 import { createProducts } from "./server/products.mjs";
+import demoCatalog from "./src/demo-catalog.json" with { type: "json" };
 
 const production = process.argv.includes("--production");
 const env = {
@@ -49,44 +50,6 @@ const vite = production
       appType: "spa",
     });
 const rates = new Map();
-const demoCatalog = [
-  {
-    id: "sweatshirt",
-    name: "学院风西装外套",
-    category: "top",
-    image: "/demo/sweatshirt.jpg",
-    detail: "清晰参考 · 黑色",
-  },
-  {
-    id: "shirt",
-    name: "条纹短款外套",
-    category: "top",
-    image: "/demo/top.jpg",
-    detail: "轻盈廓形 · 米白",
-  },
-  {
-    id: "jeans",
-    name: "直筒原色牛仔裤",
-    category: "bottom",
-    image: "/demo/jeans.jpg",
-    detail: "丹宁纹理 · 深蓝",
-  },
-  {
-    id: "skirt",
-    name: "学院风百褶短裙",
-    category: "bottom",
-    image: "/demo/skirt.jpg",
-    detail: "运动学院 · 墨黑",
-  },
-  {
-    id: "hat",
-    name: "白色棒球帽",
-    category: "accessory",
-    image: "/demo/hat.jpg",
-    detail: "点睛配饰 · 奶白",
-    accessory: "帽子",
-  },
-];
 const mime = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript",

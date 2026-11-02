@@ -590,7 +590,7 @@ fieldset {
 }
 .outfit-slots {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 9px;
 }
 .outfit-slot {
@@ -610,12 +610,12 @@ fieldset {
   width: 100%;
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 5px;
   text-align: left;
   min-width: 0;
 }
 .slot-image {
-  width: 39px;
+  width: 30px;
   height: 45px;
   flex: none;
   display: grid;
@@ -670,7 +670,7 @@ fieldset {
 .category-tabs {
   display: flex;
   align-items: center;
-  gap: 21px;
+  gap: 17px;
   border-bottom: 1px solid var(--line);
   margin-top: 18px;
 }

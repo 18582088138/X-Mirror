@@ -61,6 +61,11 @@ if (existsSync("ref_material/网站试衣服.mov")) {
 if (existsSync("public/demo/studio.jpg")) unlinkSync("public/demo/studio.jpg");
 image(
   "ref_material/materials/references/outfit.png",
+  "public/demo/suit.jpg",
+  "crop=900:1200:600:100",
+);
+image(
+  "ref_material/materials/references/outfit.png",
   "public/demo/sweatshirt.jpg",
   "crop=700:850:650:110",
 );
@@ -100,6 +105,9 @@ image(
   "public/demo/woman.jpg",
   "scale=640:-1",
 );
+for (const name of ["jacket", "sweater", "coat"])
+  if (existsSync(`ref_material/clothes/${name}.jpg`))
+    copyFileSync(`ref_material/clothes/${name}.jpg`, `public/demo/${name}.jpg`);
 for (const name of ["woman", "man", "athlete"])
   if (existsSync(`ref_material/materials/inputs/${name}.mp4`))
     copyFileSync(

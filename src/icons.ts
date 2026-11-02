@@ -8,6 +8,7 @@ const shapes: Record<string, string> = {
   close: '<path d="m6 6 12 12M6 18 18 6"/>',
   download: '<path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/>',
   shirt: '<path d="m8 3-6 4 3 5 3-2v11h8V10l3 2 3-5-6-4c-1 3-7 3-8 0Z"/>',
+  suit: '<path d="m8 2-5 3 2 4 3-2v6h8V7l3 2 2-4-5-3M8 16h8l2 6h-5l-1-4-1 4H6Z"/>',
   pants: '<path d="M6 3h12l2 18h-6l-2-12-2 12H4ZM6 7h12"/>',
   hat: '<path d="M6 15V9a6 6 0 0 1 12 0v6M3 15h18l-2 5H5ZM12 3v12"/>',
   check: '<path d="m5 12 4 4L19 6"/>',
